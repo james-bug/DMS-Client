@@ -1,0 +1,63 @@
+---
+
+# Notes:
+# Sample project C code is not presently written to produce a release artifact.
+# As such, release build options are disabled.
+# This sample, therefore, only demonstrates running a collection of unit tests.
+
+
+:project:
+  :use_exceptions: FALSE
+  :use_test_preprocessor: TRUE
+  :use_auxiliary_dependencies: TRUE
+  :build_root: build
+  :test_file_prefix: test_
+  :which_ceedling: gem
+  :ceedling_version: 0.31.1
+  :default_tasks:
+    - test:all
+
+:paths:
+  :test:
+    - +:test/**
+    - -:test/support
+  :source:
+    - src/**
+  :support:
+    - test/support
+    - test/mocks      # 加入Mock路徑
+  :include:
+    - src/**
+    - test/support    # 確保可以找到測試專用標頭檔
+
+:defines:
+  :common: &common_defines
+    - UNIT_TEST       # 加入單元測試標記
+  :test:
+    - *common_defines
+    - TEST
+    - BCML_MIDDLEWARE_ENABLED=0  # 測試時關閉BCML
+
+:cmock:
+  :mock_prefix: mock_
+  :when_no_prototypes: :warn
+  :enforce_strict_ordering: FALSE  # 改為FALSE，降低Mock複雜度
+  :plugins:
+    - :ignore
+    - :callback
+    - :return_thru_ptr
+  :treat_as:
+    uint8:    HEX8
+    uint16:   HEX16
+    uint32:   UINT32
+    int8:     INT8
+    bool:     UINT8
+    dms_result_t: UINT32
+
+:plugins:
+  :load_paths:
+    - "#{Ceedling.load_path}"
+  :enabled:
+    - stdout_pretty_tests_report
+    - module_generator
+    - gcov                    # 加入覆蓋率支援
