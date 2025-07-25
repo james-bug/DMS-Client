@@ -34,8 +34,14 @@
 /* AWS IOT Module */
 #include "dms_aws_iot.h" 
 
-/* 新增 Shadow 模組 include */
+/* Shadow Module */
 #include "dms_shadow.h"  
+
+/* Command Module*/
+#include "dms_command.h"
+
+/* Backoff module */
+#include "dms_reconnect.h"
 
 /* DMS API Client */
 #ifdef DMS_API_ENABLED
@@ -1848,39 +1854,25 @@ static void eventCallback(MQTTContext_t *pMqttContext,
                 } else if (isUpdateRejected) {
                     printf("❌ Shadow update rejected\n");
                 } else if (isUpdateDelta) {
-	            DMS_LOG_SHADOW("🔃 Shadow delta received - processing DMS command...");
-                    /* 解析 Shadow Delta 訊息 */
-                    DMSCommand_t command;
-                    int parseResult = parseShadowDelta(
+               
+		    DMS_LOG_SHADOW("🔃 Shadow delta received - processing DMS command...");
+                    
+                    /* 🆕 使用新的命令處理模組 - 一個函數搞定所有邏輯 */
+                    dms_result_t cmdResult = dms_command_process_shadow_delta(
+                        topicName,
                         (char *)pDeserializedInfo->pPublishInfo->pPayload,
-                        pDeserializedInfo->pPublishInfo->payloadLength,
-                        &command
+                        pDeserializedInfo->pPublishInfo->payloadLength
                     );
-
-                    if (parseResult == DMS_SUCCESS && command.type != DMS_CMD_NONE) {
-                        /* 儲存當前命令 */
-                        g_currentCommand = command;
-
-                        /* 處理 DMS 命令 */
-                        int handleResult = handleDMSCommand(&g_currentCommand);
-
-                        /* 重設 desired state (避免重複執行) */
-                        int resetResult = resetDesiredState(pMqttContext, g_currentCommand.key);
-
-                        /* 回報命令處理結果 */
-                        DMSCommandResult_t cmdResult = (handleResult == DMS_SUCCESS) ?
-                                                      DMS_CMD_RESULT_SUCCESS : DMS_CMD_RESULT_FAILED;
-                        reportCommandResult(pMqttContext, g_currentCommand.key, cmdResult);
-
-                        if (handleResult == DMS_SUCCESS && resetResult == DMS_SUCCESS) {
-                            printf("✅ DMS command processed and reset successfully\n");
-                        } else {
-                            printf("⚠️  DMS command processed but reset failed\n");
-                        }
+                    
+                    if (cmdResult == DMS_SUCCESS) {
+                        printf("✅ DMS command processed successfully via new command module\n");
+                        DMS_LOG_INFO("✅ Shadow delta command executed successfully");
                     } else {
-                        printf("⚠️  Failed to parse or unknown DMS command in delta\n");
-                    }
-                } else if (isGetAccepted) {
+                        printf("❌ DMS command processing failed via new command module: %d\n", cmdResult);
+                        DMS_LOG_ERROR("❌ Failed to process Shadow delta command: %d", cmdResult);
+                    }       
+	
+		} else if (isGetAccepted) {
                     printf("✅ Shadow get accepted - processing device binding info\n");
 
                     /* 解析 Shadow 文檔並檢查綁定狀態 */
@@ -2790,6 +2782,46 @@ int main(int argc, char **argv)
     }
     printf("✅ AWS IoT module initialized successfully\n");
 
+    /* 🆕 新增：步驟1.6：初始化重連模組 */
+    printf("\n=== Step 1.6: Reconnect Module Initialization ===\n");
+    DMS_LOG_INFO("Initializing reconnect module...");
+    const dms_reconnect_config_t* reconnect_config = dms_config_get_reconnect();
+    if (dms_reconnect_init(reconnect_config) != DMS_SUCCESS) {
+        DMS_LOG_ERROR("❌ Failed to initialize reconnect module");
+        printf("❌ Reconnect module initialization failed\n");
+        returnStatus = EXIT_FAILURE;
+        goto cleanup;
+    }
+    
+
+     /* 🆕 新增：步驟1.7：初始化命令處理模組 */
+    printf("\n=== Step 1.7: Command Module Initialization ===\n");
+    DMS_LOG_INFO("Initializing command processing module...");
+    if (dms_command_init() != DMS_SUCCESS) {
+        DMS_LOG_ERROR("❌ Failed to initialize command processing module");
+        printf("❌ Command module initialization failed\n");
+        returnStatus = EXIT_FAILURE;
+        goto cleanup;
+    }
+    
+    /* 🆕 註冊 BCML 處理器（如果啟用）*/
+#ifdef BCML_MIDDLEWARE_ENABLED
+    dms_command_register_bcml_handler(bcml_execute_wifi_control);
+    DMS_LOG_INFO("✅ BCML command handler registered");
+#endif
+    printf("✅ Command module initialized successfully\n");
+
+
+    /* 🆕 新增：註冊重連介面（依賴注入）*/
+    dms_reconnect_interface_t reconnect_interface = {
+        .connect = dms_aws_iot_connect,           
+        .disconnect = dms_aws_iot_disconnect,     
+        .restart_shadow = dms_shadow_start        
+    };
+    dms_reconnect_register_interface(&reconnect_interface);
+    DMS_LOG_INFO("✅ Reconnect module initialized and interface registered");
+    printf("✅ Reconnect module initialized successfully\n");
+
     /* 解析命令列參數 */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -2873,60 +2905,29 @@ int main(int argc, char **argv)
     DMS_LOG_INFO("Initializing MAC address seed for backoff strategy...");
     initializeMacAddressSeed(&g_reconnectState);
 
-#ifdef DMS_API_ENABLED
-    /* 初始化 DMS API 客戶端 */
-    DMS_LOG_INFO("🌐 Initializing DMS API client...");
-    if (dms_api_client_init() != DMS_API_SUCCESS) {
-        printf("❌ Failed to initialize DMS API client\n");
-        returnStatus = EXIT_FAILURE;
-        goto cleanup;
-    }
-
-    /* DMS Server 配置獲取和處理 */
-    printf("\n=== DMS Server Configuration ===\n");
-    DMSServerConfig_t serverConfig = {0};
-    if (initializeDMSServerConfig(&serverConfig) == DMS_SUCCESS) {
-        printf("✅ DMS Server configuration completed successfully\n");
-    } else {
-        printf("⚠️  DMS Server configuration failed, using defaults\n");
-    }
-#endif
-
-    /* 🆕 步驟2：建立 AWS IoT 連接（使用新模組）*/
-    printf("\n=== Step 2: AWS IoT Connection (New Module Integration) ===\n");
+    /* 🆕 步驟2：AWS IoT 連接建立 */
+    printf("\n=== Step 2: AWS IoT Connection ===\n");
     if (dms_aws_iot_connect() != DMS_SUCCESS) {
-        printf("❌ AWS IoT connection failed\n");
+        printf("❌ Failed to establish AWS IoT connection\n");
         returnStatus = EXIT_FAILURE;
         goto cleanup;
     }
-    printf("✅ AWS IoT connection established via new module\n");
+    printf("✅ AWS IoT connection established successfully\n");
 
-    /* 🆕 步驟2.5：初始化 Shadow 模組（使用依賴注入）*/
-    printf("\n=== Step 2.5: Shadow Module Integration ===\n");
-    mqtt_interface_t mqtt_interface = dms_aws_iot_get_interface();
-    if (dms_shadow_init(&mqtt_interface) != DMS_SUCCESS) {
-        printf("❌ Shadow module initialization failed\n");
-        returnStatus = EXIT_FAILURE;
-        goto cleanup;
-    }
-    printf("✅ Shadow module initialized successfully\n");
+    /* 標記連接狀態 */
+    g_reconnectState.state = CONNECTION_STATE_CONNECTED;
+    g_reconnectState.lastConnectTime = (uint32_t)time(NULL);
 
-    /* 🆕 步驟2.6：啟動 Shadow 服務 */
-    printf("📡 Starting Shadow service...\n");
-    if (dms_shadow_start() != DMS_SUCCESS) {
-        printf("❌ Shadow service start failed\n");
-        returnStatus = EXIT_FAILURE;
-        goto cleanup;
-    }
-    printf("✅ Shadow service started successfully\n");
-
-    /* 🆕 步驟2.7：等待 Shadow Get 回應 */
-    printf("⏳ Waiting for initial Shadow Get response...\n");
-    if (dms_shadow_wait_get_response(SHADOW_GET_TIMEOUT_MS) == DMS_SUCCESS) {
-        printf("✅ Shadow Get response received\n");
+    /* 🆕 步驟2.1：Shadow 服務啟動 */
+    printf("\n=== Step 2.1: Shadow Service ===\n");
+    if (dms_shadow_start() == DMS_SUCCESS) {
+        printf("✅ Shadow service started successfully\n");
         
-        /* 檢查設備綁定狀態（使用新模組）*/
-        if (dms_shadow_is_device_bound()) {
+        /* 等待 Shadow Get 回應 */
+        if (dms_shadow_wait_get_response(SHADOW_GET_TIMEOUT_MS) == DMS_SUCCESS) {
+            printf("✅ Shadow Get response received\n");
+            
+            /* 檢查設備綁定狀態 */
             const device_bind_info_t* bind_info = dms_shadow_get_bind_info();
             printf("🎯 Device is bound to DMS Server\n");
             printf("   Company: %s (ID: %s)\n", bind_info->companyName, bind_info->companyId);
@@ -2967,6 +2968,14 @@ int main(int argc, char **argv)
 
 cleanup:
     printf("\n=== Cleanup (New Module Integration) ===\n");
+ 
+
+    /* 🆕 新增：清理命令處理模組 */ 
+    dms_command_cleanup();
+
+
+    /* 🆕 新增：清理重連模組 */
+    dms_reconnect_cleanup();
     
     /* 🆕 使用新的清理方式 */
     dms_aws_iot_cleanup();
@@ -2983,11 +2992,11 @@ cleanup:
     printf("   Status: %d\n", returnStatus);
     printf("   Total Reconnects: %u\n", g_reconnectState.totalReconnects);
     printf("   Final State: %s\n",
-           g_reconnectState.state == CONNECTION_STATE_CONNECTED ? "Connected" : "Disconnected");
+           g_reconnectState.state == CONNECTION_STATE_CONNECTED ?
+           "Connected" : "Disconnected");
 
     return returnStatus;
 }
-
 
 /* 🔄 第三步：實作新的主迴圈函數 */
 
@@ -3036,27 +3045,38 @@ static void runMainLoopWithNewModule(void)
             /* 每 10 秒顯示狀態 */
             loopCount++;
             if (loopCount % 10 == 0) {
-                printf("📊 Loop: %u | Connected: %us | Reconnects: %u | Module: FULL-NEW\n",
-                       loopCount,
-                       currentTime - g_reconnectState.lastConnectTime,
-                       g_reconnectState.totalReconnects);
+                uint32_t connectedTime = currentTime - g_reconnectState.lastConnectTime;
+                printf("📊 Loop: %u | Connected: %us | Reconnects: %u | Module: NEW-RECONNECT\n",
+                       loopCount, connectedTime, g_reconnectState.totalReconnects);
             }
 
         } else if (g_reconnectState.state == CONNECTION_STATE_DISCONNECTED ||
                    g_reconnectState.state == CONNECTION_STATE_ERROR) {
             
-            /* 處理重連邏輯 */
-            if (g_reconnectState.retryCount < MAX_RETRY_ATTEMPTS) {
-                /* 🆕 使用完全模組化的重連函數 */
-                if (attemptReconnection() == EXIT_SUCCESS) {
-                    printf("🎯 Reconnection successful, resuming normal operation\n");
+            /* 🆕 使用新的重連模組處理重連邏輯 - 替換這整個區塊 */
+            /* 🆕 使用新模組檢查是否應該重連 */
+            if (dms_reconnect_should_retry()) {
+                /* 🆕 使用新模組執行重連 */
+                dms_result_t reconnect_result = dms_reconnect_attempt();
+                
+                if (reconnect_result == DMS_SUCCESS) {
+                    printf("🎯 Reconnection successful via new module, resuming normal operation\n");
+                    
+                    /* 🆕 同步狀態：將新模組的狀態同步到全域狀態 */
+                    g_reconnectState.state = CONNECTION_STATE_CONNECTED;
+                    dms_reconnect_get_stats(&g_reconnectState.retryCount, &g_reconnectState.totalReconnects);
+                    g_reconnectState.lastConnectTime = (uint32_t)time(NULL);
                 } else {
-                    printf("❌ Reconnection failed, waiting before retry...\n");
-                    sleep(5); // 短暫等待後繼續嘗試
+                    printf("❌ Reconnection failed via new module, waiting before retry...\n");
+                    
+                    /* 🆕 同步失敗狀態 */
+                    g_reconnectState.state = CONNECTION_STATE_ERROR;
+                    dms_reconnect_get_stats(&g_reconnectState.retryCount, NULL);
+                    
+                    sleep(1); // 短暫等待後繼續嘗試
                 }
             } else {
-                printf("💀 Maximum reconnection attempts (%u) exceeded, giving up...\n",
-                       MAX_RETRY_ATTEMPTS);
+                printf("💀 Maximum reconnection attempts exceeded via new module, giving up...\n");
                 break;
             }
         }
@@ -3065,11 +3085,6 @@ static void runMainLoopWithNewModule(void)
         sleep(1);
     }
 
-    printf("🛑 Exiting main loop (fully modularized)\n");
+    printf("🛑 Exiting main loop (with new reconnect module)\n");
 }
-
-
-
-
-
 
