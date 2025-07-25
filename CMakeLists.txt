@@ -172,6 +172,7 @@ set(DMS_CLIENT_SOURCES
     src/dms_aws_iot.c
     src/dms_shadow.c
     src/dms_command.c
+    src/dms_reconnect.c
 )
 
 # 如果 BCML 啟用，加入適配器
