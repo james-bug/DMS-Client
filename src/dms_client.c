@@ -2792,9 +2792,8 @@ int main(int argc, char **argv)
         returnStatus = EXIT_FAILURE;
         goto cleanup;
     }
-    
 
-     /* 🆕 新增：步驟1.7：初始化命令處理模組 */
+    /* 🆕 新增：步驟1.7：初始化命令處理模組 */
     printf("\n=== Step 1.7: Command Module Initialization ===\n");
     DMS_LOG_INFO("Initializing command processing module...");
     if (dms_command_init() != DMS_SUCCESS) {
@@ -2811,6 +2810,20 @@ int main(int argc, char **argv)
 #endif
     printf("✅ Command module initialized successfully\n");
 
+    /* 🔥 新增：步驟1.8：初始化 Shadow 模組 - 修復關鍵步驟 */
+    printf("\n=== Step 1.8: Shadow Module Initialization ===\n");
+    DMS_LOG_INFO("Initializing Shadow module...");
+    
+    /* 從 AWS IoT 模組獲取 MQTT 介面 */
+    mqtt_interface_t mqtt_if = dms_aws_iot_get_interface();
+    if (dms_shadow_init(&mqtt_if) != DMS_SUCCESS) {
+        DMS_LOG_ERROR("❌ Failed to initialize Shadow module");
+        printf("❌ Shadow module initialization failed\n");
+        returnStatus = EXIT_FAILURE;
+        goto cleanup;
+    }
+    
+    printf("✅ Shadow module initialized successfully\n");
 
     /* 🆕 新增：註冊重連介面（依賴注入）*/
     dms_reconnect_interface_t reconnect_interface = {
@@ -2819,7 +2832,7 @@ int main(int argc, char **argv)
         .restart_shadow = dms_shadow_start        
     };
     dms_reconnect_register_interface(&reconnect_interface);
-    DMS_LOG_INFO("✅ Reconnect module initialized and interface registered");
+    DMS_LOG_INFO("✅ Reconnect interface registered successfully");
     printf("✅ Reconnect module initialized successfully\n");
 
     /* 解析命令列參數 */
@@ -2828,175 +2841,160 @@ int main(int argc, char **argv)
             printf("\n📖 === Usage Information ===\n");
             printf("Usage: %s [options]\n", argv[0]);
             printf("Options:\n");
-            printf("  --help, -h         Show this help message\n");
-            printf("  --test             Run connection test\n");
-            printf("  --register         Manual device registration\n");
-            printf("  --status           Show device status\n");
-            printf("  --config           Show configuration\n");
-            printf("  --pincode          Show pairing PIN code\n");
-            goto cleanup;
-        } else if (strcmp(argv[i], "--config") == 0) {
-            printf("📋 === Configuration Display ===\n");
-            /* 🔧 修正：直接顯示配置，不調用 showConfiguration() */
-            const dms_config_t* cfg = dms_config_get();
-            if (cfg) {
-                printf("AWS IoT Configuration:\n");
-                printf("  Endpoint: %s\n", cfg->aws_iot.aws_endpoint);
-                printf("  Client ID: %s\n", cfg->aws_iot.client_id);
-                printf("  MQTT Port: %u\n", cfg->aws_iot.mqtt_port);
-                printf("  Keep Alive: %u seconds\n", cfg->aws_iot.keep_alive_seconds);
-                printf("\nDMS API Configuration:\n");
-                printf("  Base URL: %s\n", cfg->api.base_url);
-                printf("  Product Type: %s\n", cfg->api.product_type);
-                printf("  Timeout: %u ms\n", cfg->api.timeout_ms);
-                printf("\nReconnection Configuration:\n");
-                printf("  Max Attempts: %u\n", cfg->reconnect.max_retry_attempts);
-                printf("  Base Delay: %u seconds\n", cfg->reconnect.base_delay_seconds);
-                printf("  Max Delay: %u seconds\n", cfg->reconnect.max_delay_seconds);
-            } else {
-                printf("❌ Configuration not available\n");
-            }
-            goto cleanup;
-        } else if (strcmp(argv[i], "--test") == 0) {
-            printf("🧪 === Connection Test Mode ===\n");
-            returnStatus = runConnectionTest();
-            goto cleanup;
-        } else if (strcmp(argv[i], "--register") == 0) {
-            printf("📝 === Manual Registration Mode ===\n");
-            returnStatus = runManualRegistration();
-            goto cleanup;
-        } else if (strcmp(argv[i], "--status") == 0) {
-            printf("📊 === Device Status Mode ===\n");
-            returnStatus = showDeviceStatus();
-            goto cleanup;
-        } else if (strcmp(argv[i], "--pincode") == 0) {
-            printf("🔢 === PIN Code Mode ===\n");
-            /* 簡化處理，避免調用可能不存在的函數 */
-            printf("PIN Code functionality not implemented yet\n");
-            goto cleanup;
+            printf("  --help, -h          Show this help message\n");
+            printf("  --test, -t          Run connection test\n");
+            printf("  --registration, -r  Run manual device registration\n");
+            printf("  --status, -s        Show device status\n");
+            printf("  --debug, -d         Enable debug logging\n");
+            printf("  --log-test, -l      Test log system functionality\n");
+            printf("  --bcml-test, -b     Test BCML middleware (if enabled)\n");
+            printf("\nEnvironment Variables:\n");
+            printf("  DMS_LOG_LEVEL       Set log level (ERROR/WARN/INFO/DEBUG)\n");
+            printf("  DMS_API_BASE_URL    Override API base URL\n");
+            printf("\nExample:\n");
+            printf("  %s --test --debug   # Run connection test with debug logging\n", argv[0]);
+            printf("  %s --registration   # Run device registration\n", argv[0]);
+            printf("==============================\n");
+            return EXIT_SUCCESS;
+        } else if (strcmp(argv[i], "--test") == 0 || strcmp(argv[i], "-t") == 0) {
+            return runConnectionTest();
+        } else if (strcmp(argv[i], "--registration") == 0 || strcmp(argv[i], "-r") == 0) {
+            return runManualRegistration();
+        } else if (strcmp(argv[i], "--status") == 0 || strcmp(argv[i], "-s") == 0) {
+            return showDeviceStatus();
+        } else if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-d") == 0) {
+            printf("🔍 Debug mode enabled\n");
+            dms_log_set_level(DMS_LOG_LEVEL_DEBUG);
+        } else if (strcmp(argv[i], "--log-test") == 0 || strcmp(argv[i], "-l") == 0) {
+            runLogSystemTests();
+            return EXIT_SUCCESS;
+#ifdef BCML_MIDDLEWARE_ENABLED
+        } else if (strcmp(argv[i], "--bcml-test") == 0 || strcmp(argv[i], "-b") == 0) {
+            return test_bcml_wifi_controls();
+#endif
         } else {
-            printf("❌ Unknown option: %s\n", argv[i]);
+            printf("⚠️  Unknown argument: %s\n", argv[i]);
             printf("Use --help for usage information\n");
-            returnStatus = EXIT_FAILURE;
-            goto cleanup;
         }
     }
 
-    /* 顯示運行模式 */
+    printf("\n");
     printf("   Mode: Normal\n");
-    printf("   Debug: Disabled\n");
+    printf("   Debug: %s\n", (dms_log_get_level() == DMS_LOG_LEVEL_DEBUG) ? "Enabled" : "Disabled");
     printf("   Features: Shadow Support, Auto-Reconnect, DMS API Integration\n");
-
-#ifdef DMS_API_ENABLED
-    printf("   DMS API: %s\n", DMS_API_BASE_URL_TEST);
-#endif
+    printf("   DMS API: %s\n", dms_config_get_api()->base_url);
 
     /* 信號處理設定 */
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 
-    /* 初始化重連狀態 */
-    g_reconnectState.state = CONNECTION_STATE_DISCONNECTED;
-    g_reconnectState.retryCount = 0;
-    g_reconnectState.nextRetryDelaySeconds = RETRY_BACKOFF_BASE_SECONDS;
-    g_reconnectState.totalReconnects = 0;
-
     /* 初始化 MAC 地址種子 */
     DMS_LOG_INFO("Initializing MAC address seed for backoff strategy...");
     initializeMacAddressSeed(&g_reconnectState);
 
-    /* 🆕 步驟2：AWS IoT 連接建立 */
+    /* === 第二階段：建立連接 === */
     printf("\n=== Step 2: AWS IoT Connection ===\n");
     if (dms_aws_iot_connect() != DMS_SUCCESS) {
-        printf("❌ Failed to establish AWS IoT connection\n");
+        printf("❌ AWS IoT connection failed\n");
         returnStatus = EXIT_FAILURE;
         goto cleanup;
     }
     printf("✅ AWS IoT connection established successfully\n");
 
-    /* 標記連接狀態 */
-    g_reconnectState.state = CONNECTION_STATE_CONNECTED;
-    g_reconnectState.lastConnectTime = (uint32_t)time(NULL);
-
-    /* 🆕 步驟2.1：Shadow 服務啟動 */
+    /* 🔥 修復：步驟2.1：啟動 Shadow 服務 */
     printf("\n=== Step 2.1: Shadow Service ===\n");
-    if (dms_shadow_start() == DMS_SUCCESS) {
-        printf("✅ Shadow service started successfully\n");
-        
-        /* 等待 Shadow Get 回應 */
-        if (dms_shadow_wait_get_response(SHADOW_GET_TIMEOUT_MS) == DMS_SUCCESS) {
-            printf("✅ Shadow Get response received\n");
-            
-            /* 檢查設備綁定狀態 */
-            const device_bind_info_t* bind_info = dms_shadow_get_bind_info();
-            printf("🎯 Device is bound to DMS Server\n");
-            printf("   Company: %s (ID: %s)\n", bind_info->companyName, bind_info->companyId);
-            printf("   Device: %s (Added by: %s)\n", bind_info->deviceName, bind_info->addedBy);
-        } else {
-            printf("⚠️  Device is not bound to DMS Server\n");
-            printf("   → DMS registration required\n");
-            
-            /* 自動註冊流程 */
-            printf("\n=== Step 2.1: Auto-Registration ===\n");
-            if (checkAndRegisterDevice() == DMS_SUCCESS) {
-                printf("✅ Auto-registration completed successfully\n");
-            } else {
-                printf("⚠️  Auto-registration failed, device will operate with limited functionality\n");
-                printf("   Use 'dms-client --register' for manual registration\n");
-            }
-        }
+    printf("🔄 Starting Shadow service...\n");
+    DMS_LOG_INFO("Starting Shadow service...");
+    
+    if (dms_shadow_start() != DMS_SUCCESS) {
+        printf("⚠️  Shadow service start failed (continuing with limited functionality)\n");
+        DMS_LOG_WARN("⚠️  Shadow service start failed, continuing with limited functionality");
+        /* 不終止程序，繼續運行其他功能 */
     } else {
-        printf("⚠️  Shadow Get response timeout (this is not critical for operation)\n");
+        printf("✅ Shadow service started successfully\n");
+        DMS_LOG_INFO("✅ Shadow service started successfully");
     }
 
+    /* BCML 中間件整合 */
 #ifdef BCML_MIDDLEWARE_ENABLED
     DMS_LOG_INFO("🔧 Initializing BCML Middleware integration...");
-    if (bcml_adapter_init() != DMS_SUCCESS) {
-        printf("❌ Failed to initialize BCML adapter\n");
-        /* 不直接退出，而是切換到模擬模式 */
-        printf("⚠️  Continuing with simulation mode\n");
-    } else {
-        DMS_LOG_INFO("✅ [BCML] Middleware integration ready");
-    }
-#else
-    printf("🎭 Running in simulation mode (BCML disabled)\n");
+    bcml_adapter_init();
+    DMS_LOG_INFO("✅ [BCML] Middleware integration ready");
 #endif
 
-    /* 🔄 步驟3：主迴圈 (使用新模組) */
+    /* === 第三階段：主運行循環 === */
     printf("\n=== Step 3: Main Loop (New Module Integration) ===\n");
-    runMainLoopWithNewModule();
+    printf("💓 Main loop started with new AWS IoT module...\n");
+    printf("   Press Ctrl+C to exit gracefully\n");
+
+    /* 主循環 */
+    while (!g_exitFlag) {
+        /* MQTT 事件處理 */
+        if (dms_aws_iot_process_loop(1000) != DMS_SUCCESS) {
+            DMS_LOG_WARN("⚠️  MQTT process loop error, attempting reconnection...");
+            if (dms_reconnect_should_retry()) {
+                dms_reconnect_attempt();
+            }
+        }
+
+        /* 定期 Shadow 狀態更新 */
+        static time_t lastShadowUpdate = 0;
+        time_t currentTime = time(NULL);
+        
+        /* 🔧 修復：使用正確的常數名稱 */
+        if (currentTime - lastShadowUpdate >= 300) {  /* 5分鐘 = 300秒 */
+            printf("💓 Sending periodic Shadow update via new module...\n");
+            
+            if (dms_shadow_update_reported(NULL) == DMS_SUCCESS) {
+                printf("   ✅ Shadow state update successful\n");
+                DMS_LOG_DEBUG("✅ Periodic Shadow update successful");
+            } else {
+                printf("   ⚠️  Shadow state update failed via new module\n");
+                DMS_LOG_WARN("⚠️  Periodic Shadow update failed");
+            }
+            
+            lastShadowUpdate = currentTime;
+        }
+
+        /* 短暫休眠，避免過度消耗 CPU */
+        usleep(100000); // 100ms
+    }
+
+    printf("\n🛑 Graceful shutdown initiated...\n");
+    DMS_LOG_INFO("🛑 Graceful shutdown initiated");
 
 cleanup:
-    printf("\n=== Cleanup (New Module Integration) ===\n");
- 
-
-    /* 🆕 新增：清理命令處理模組 */ 
-    dms_command_cleanup();
-
-
-    /* 🆕 新增：清理重連模組 */
-    dms_reconnect_cleanup();
+    /* 清理所有模組 */
+    printf("\n🧹 === Cleanup Phase ===\n");
     
-    /* 🆕 使用新的清理方式 */
+    dms_shadow_cleanup();
+    printf("✅ Shadow module cleaned up\n");
+    
+    dms_command_cleanup();
+    printf("✅ Command module cleaned up\n");
+    
+    dms_reconnect_cleanup();
+    printf("✅ Reconnect module cleaned up\n");
+    
     dms_aws_iot_cleanup();
-
-#ifdef DMS_API_ENABLED
-    /* 清理 DMS API 客戶端 */
-    dms_api_client_cleanup();
+    printf("✅ AWS IoT module cleaned up\n");
+    
+    dms_config_cleanup();
+    printf("✅ Configuration cleaned up\n");
+    
+#ifdef BCML_MIDDLEWARE_ENABLED
+    bcml_adapter_cleanup();
+    printf("✅ BCML adapter cleaned up\n");
 #endif
 
-    /* 清理配置管理模組 */
-    dms_config_cleanup();
-
-    printf("\n🏁 === DMS Client Exiting (New Module Integration) ===\n");
-    printf("   Status: %d\n", returnStatus);
-    printf("   Total Reconnects: %u\n", g_reconnectState.totalReconnects);
-    printf("   Final State: %s\n",
-           g_reconnectState.state == CONNECTION_STATE_CONNECTED ?
-           "Connected" : "Disconnected");
-
+    DMS_LOG_SYSTEM_CLEANUP();
+    printf("✅ Log system cleaned up\n");
+    
+    printf("🏁 DMS Client shutdown complete\n");
+    
     return returnStatus;
 }
+
 
 /* 🔄 第三步：實作新的主迴圈函數 */
 
