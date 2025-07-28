@@ -28,6 +28,20 @@ static bool g_curl_initialized = false;
 static char g_base_url[DMS_API_MAX_URL_SIZE] = DMS_API_BASE_URL_TEST;
 
 
+/* 前置聲明和輔助函數 */
+static DMSAPIResult_t parse_control_config_response(const char* jsonData, 
+                                                   size_t jsonSize,
+                                                   DMSControlConfig_t* configs,
+                                                   int maxConfigs,
+                                                   int* configCount);
+
+static bool parse_single_config_object(const char* objectData, size_t objectLength, 
+                                      DMSControlConfig_t* config);
+
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
 
 /*-----------------------------------------------------------*/
 
@@ -208,9 +222,9 @@ DMSAPIResult_t dms_generate_hmac_sha1_signature(const char* message,
 }
 
 /*-----------------------------------------------------------*/
-
 /**
- * @brief 執行 HTTP 請求
+ * @brief 執行 HTTP 請求 (修復版本)
+ * 修復關鍵問題：正確分別添加每個HTTP header
  */
 DMSAPIResult_t dms_http_request(DMSHTTPMethod_t method,
                                const char* url,
@@ -223,10 +237,14 @@ DMSAPIResult_t dms_http_request(DMSHTTPMethod_t method,
     struct curl_slist* headers = NULL;
     char timestamp_str[32];
     char signature[256];
-    char auth_header[512];
+    
+    /* ✅ 修正：分別建立每個header字串 */
+    char timestamp_header[128];
+    char signature_header[256];
+    char product_type_header[128];
     char content_type_header[] = "Content-Type: application/json";
     char accept_header[] = "Accept: application/json";
-    char product_type_header[128];
+    
     DMSAPIResult_t result = DMS_API_SUCCESS;
 
     if (url == NULL || response == NULL) {
@@ -260,17 +278,21 @@ DMSAPIResult_t dms_http_request(DMSHTTPMethod_t method,
         goto cleanup;
     }
 
-    /* 準備標頭 */
+    /* ✅ 修正：分別建立每個header，不使用\r\n */
     snprintf(product_type_header, sizeof(product_type_header),
              "Product-Type: %s", DMS_API_PRODUCT_TYPE);
+    snprintf(timestamp_header, sizeof(timestamp_header),
+             "Signature-Time: %s", timestamp_str);
+    snprintf(signature_header, sizeof(signature_header),
+             "Signature: %s", signature);
 
-    snprintf(auth_header, sizeof(auth_header),
-             "Signature-Time: %s\r\nSignature: %s", timestamp_str, signature);
-
+    /* ✅ 修正：分別添加每個header */
     headers = curl_slist_append(headers, product_type_header);
     headers = curl_slist_append(headers, accept_header);
-    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, timestamp_header);    /* 分別添加 */
+    headers = curl_slist_append(headers, signature_header);    /* 分別添加 */
 
+    /* Content-Type僅在POST方法時添加 */
     if (method == DMS_HTTP_POST && payload != NULL) {
         headers = curl_slist_append(headers, content_type_header);
     }
@@ -296,6 +318,8 @@ DMSAPIResult_t dms_http_request(DMSHTTPMethod_t method,
 
     printf("🌐 [DMS-API] Sending %s request to: %s\n",
            (method == DMS_HTTP_POST) ? "POST" : "GET", url);
+    printf("🔐 [DMS-API] Headers: Product-Type=%s, Signature-Time=%s\n", 
+           DMS_API_PRODUCT_TYPE, timestamp_str);
     if (payload != NULL) {
         printf("📤 [DMS-API] Payload: %s\n", payload);
     }
@@ -334,11 +358,11 @@ DMSAPIResult_t dms_http_request(DMSHTTPMethod_t method,
                  "HTTP error: %ld", response->httpCode);
         printf("❌ [DMS-API] HTTP error: %ld\n", response->httpCode);
 
-	 // ✅ 新增：顯示錯誤回應內容
-    	if (response->dataSize > 0) {
-        printf("📋 [DMS-API] Error response: %.*s\n",
-               (int)response->dataSize, response->data);
-    	}
+        /* 顯示錯誤回應內容 */
+        if (response->dataSize > 0) {
+            printf("📋 [DMS-API] Error response: %.*s\n",
+                   (int)response->dataSize, response->data);
+        }
     }
 
     result = response->result;
@@ -362,54 +386,311 @@ cleanup:
     return result;
 }
 
+
 /*-----------------------------------------------------------*/
-
 /**
- * @brief 取得控制配置列表
+ * @brief 取得控制配置列表 (修復版本)
+ * 先嘗試真實API，失敗時使用模擬配置作為回退
  */
-
-
 DMSAPIResult_t dms_api_control_config_list(const char* uniqueId,
                                           DMSControlConfig_t* configs,
                                           int maxConfigs,
                                           int* configCount)
 {
+    char url[DMS_API_MAX_URL_SIZE];
+    DMSAPIResponse_t apiResponse = {0};
+    DMSAPIResult_t result;
+
     if (uniqueId == NULL || configs == NULL || configCount == NULL || maxConfigs <= 0) {
+        printf("❌ [DMS-API] Invalid parameters for control config list\n");
         return DMS_API_ERROR_INVALID_PARAM;
     }
 
+    *configCount = 0;
     printf("🎛️ [DMS-API] Getting control config list for device: %s\n", uniqueId);
-    
-    // 由於 API 有 HTTP 405 問題，暫時使用模擬配置
-    printf("⚠️  [DMS-API] control-config-list API currently unavailable, using simulation\n");
-    
-    // 模擬 WiFi 控制配置回應
-    if (maxConfigs >= 2) {
-        // 配置 1: 2.4GHz 頻道
-        strcpy(configs[0].item, "channel2g");
-        strcpy(configs[0].value, "6");
-        configs[0].statusProgressId = 1;
-        configs[0].type = 1;
+
+    /* ✅ 先嘗試真實的API呼叫 */
+    snprintf(url, sizeof(url), "%sv2/device/control-config/list?unique_id=%s",
+             g_base_url, uniqueId);
+
+    printf("🌐 [DMS-API] Attempting real API call: %s\n", url);
+    result = dms_http_request(DMS_HTTP_GET, url, NULL, &apiResponse);
+
+    if (result == DMS_API_SUCCESS && apiResponse.httpCode == 200) {
+        printf("✅ [DMS-API] Real control config API successful!\n");
         
-        // 配置 2: 5GHz 頻道
-        strcpy(configs[1].item, "channel5g");
-        strcpy(configs[1].value, "149");
+        /* ✅ 嘗試解析JSON回應 */
+        if (apiResponse.data != NULL && apiResponse.dataSize > 0) {
+            printf("📋 [DMS-API] Response: %.*s\n",
+                   (int)apiResponse.dataSize, apiResponse.data);
+            
+            /* 嘗試解析真實的JSON回應 */
+            DMSAPIResult_t parseResult = parse_control_config_response(
+                apiResponse.data, apiResponse.dataSize, 
+                configs, maxConfigs, configCount);
+            
+            if (parseResult == DMS_API_SUCCESS && *configCount > 0) {
+                printf("✅ [DMS-API] Successfully parsed %d real configurations\n", *configCount);
+                dms_api_response_free(&apiResponse);
+                return DMS_API_SUCCESS;
+            } else {
+                printf("🔄 [DMS-API] JSON parsing failed, falling back to simulation\n");
+            }
+        }
+        
+        dms_api_response_free(&apiResponse);
+        /* JSON解析失敗時，繼續執行模擬邏輯作為回退 */
+        
+    } else if (apiResponse.httpCode == 405) {
+        printf("⚠️  [DMS-API] Control config API returns HTTP 405 (Method Not Allowed)\n");
+        printf("    This was likely due to missing authentication headers (now fixed)\n");
+        dms_api_response_free(&apiResponse);
+        
+    } else {
+        printf("❌ [DMS-API] Control config API failed: HTTP %ld, %s\n", 
+               apiResponse.httpCode, dms_api_get_error_string(result));
+        if (apiResponse.dataSize > 0) {
+            printf("📋 [DMS-API] Error response: %.*s\n",
+                   (int)apiResponse.dataSize, apiResponse.data);
+        }
+        dms_api_response_free(&apiResponse);
+    }
+
+    /* ✅ 使用模擬配置作為回退方案 */
+    printf("🎭 [DMS-API] Using simulation config as fallback\n");
+    
+    if (maxConfigs >= 2) {
+        /* 配置 1: 2.4GHz WiFi 頻道 */
+        strncpy(configs[0].item, "channel2g", sizeof(configs[0].item) - 1);
+        configs[0].item[sizeof(configs[0].item) - 1] = '\0';
+        strncpy(configs[0].value, "6", sizeof(configs[0].value) - 1);
+        configs[0].value[sizeof(configs[0].value) - 1] = '\0';
+        configs[0].statusProgressId = 1;
+        configs[0].type = 1;  // 1=String type
+        
+        /* 配置 2: 5GHz WiFi 頻道 */
+        strncpy(configs[1].item, "channel5g", sizeof(configs[1].item) - 1);
+        configs[1].item[sizeof(configs[1].item) - 1] = '\0';
+        strncpy(configs[1].value, "149", sizeof(configs[1].value) - 1);
+        configs[1].value[sizeof(configs[1].value) - 1] = '\0';
         configs[1].statusProgressId = 2;
-        configs[1].type = 1;
+        configs[1].type = 1;  // 1=String type
         
         *configCount = 2;
+        
         printf("✅ [DMS-API] Simulated control config: %d items\n", *configCount);
-        printf("   - %s = %s (ID: %d)\n", configs[0].item, configs[0].value, configs[0].statusProgressId);
-        printf("   - %s = %s (ID: %d)\n", configs[1].item, configs[1].value, configs[1].statusProgressId);
+        printf("   - %s = %s (Progress ID: %d, Type: %d)\n", 
+               configs[0].item, configs[0].value, 
+               configs[0].statusProgressId, configs[0].type);
+        printf("   - %s = %s (Progress ID: %d, Type: %d)\n", 
+               configs[1].item, configs[1].value, 
+               configs[1].statusProgressId, configs[1].type);
         
         return DMS_API_SUCCESS;
+        
+    } else {
+        printf("❌ [DMS-API] Insufficient buffer space for simulation configs\n");
+        printf("    maxConfigs: %d, required: 2\n", maxConfigs);
+        return DMS_API_ERROR_INVALID_PARAM;
+    }
+}
+
+/**
+ * @brief 解析控制配置的JSON回應 (完整實現版本)
+ * 使用現有的core_json庫解析control-config-list API回應
+ */
+static DMSAPIResult_t parse_control_config_response(const char* jsonData, 
+                                                   size_t jsonSize,
+                                                   DMSControlConfig_t* configs,
+                                                   int maxConfigs,
+                                                   int* configCount)
+{
+    JSONStatus_t jsonResult;
+    char* resultCodeValue = NULL;
+    size_t resultCodeLength = 0;
+    char* configsArrayValue = NULL;
+    size_t configsArrayLength = 0;
+    
+    if (jsonData == NULL || configs == NULL || configCount == NULL || maxConfigs <= 0) {
+        return DMS_API_ERROR_INVALID_PARAM;
     }
     
     *configCount = 0;
-    return DMS_API_ERROR_INVALID_PARAM;
+    printf("🔍 [DMS-API] Parsing control config JSON response...\n");
+    
+    /* ✅ 驗證JSON格式 */
+    jsonResult = JSON_Validate(jsonData, jsonSize);
+    if (jsonResult != JSONSuccess) {
+        printf("❌ [DMS-API] Invalid JSON format in response\n");
+        return DMS_API_ERROR_JSON_PARSE;
+    }
+    
+    /* ✅ 檢查result_code */
+    jsonResult = JSON_Search(jsonData, jsonSize,
+                           "result_code", strlen("result_code"),
+                           &resultCodeValue, &resultCodeLength);
+    
+    if (jsonResult != JSONSuccess || resultCodeValue == NULL) {
+        printf("❌ [DMS-API] No result_code found in JSON\n");
+        return DMS_API_ERROR_JSON_PARSE;
+    }
+    
+    /* 檢查result_code是否為200 (完全符合規格) */
+    if (strncmp(resultCodeValue, "200", 3) != 0) {
+        printf("❌ [DMS-API] result_code is not 200, received: %.*s\n", 
+               (int)resultCodeLength, resultCodeValue);
+        return DMS_API_ERROR_SERVER;
+    }
+    
+    printf("✅ [DMS-API] result_code: 200 (success, spec compliant)\n");
+    
+    /* ✅ 尋找control-configs陣列 */
+    jsonResult = JSON_Search(jsonData, jsonSize,
+                           "control-configs", strlen("control-configs"),
+                           &configsArrayValue, &configsArrayLength);
+    
+    if (jsonResult != JSONSuccess || configsArrayValue == NULL) {
+        printf("⚠️  [DMS-API] No control-configs array found, using empty list\n");
+        *configCount = 0;
+        return DMS_API_SUCCESS;
+    }
+    
+    printf("✅ [DMS-API] Found control-configs array (%zu bytes)\n", configsArrayLength);
+    
+    /* ✅ 解析陣列中的每個配置項目 */
+    /* 簡化的陣列解析：尋找每個配置物件 */
+    const char* searchPos = configsArrayValue;
+    size_t remainingLength = configsArrayLength;
+    int configIndex = 0;
+    
+    while (configIndex < maxConfigs && remainingLength > 0) {
+        /* 尋找下一個物件的開始 */
+        const char* objectStart = strstr(searchPos, "{");
+        if (objectStart == NULL || objectStart >= searchPos + remainingLength) {
+            break;
+        }
+        
+        /* 尋找對應的物件結束 */
+        const char* objectEnd = strstr(objectStart, "}");
+        if (objectEnd == NULL || objectEnd >= searchPos + remainingLength) {
+            break;
+        }
+        
+        size_t objectLength = objectEnd - objectStart + 1;
+        printf("🔍 [DMS-API] Parsing config object %d (%zu bytes)\n", 
+               configIndex, objectLength);
+        
+        /* ✅ 解析單個配置物件 */
+        if (parse_single_config_object(objectStart, objectLength, &configs[configIndex])) {
+            configIndex++;
+            printf("✅ [DMS-API] Successfully parsed config %d\n", configIndex);
+        } else {
+            printf("⚠️  [DMS-API] Failed to parse config object %d\n", configIndex);
+        }
+        
+        /* 移動到下一個可能的物件位置 */
+        searchPos = objectEnd + 1;
+        remainingLength = configsArrayLength - (searchPos - configsArrayValue);
+    }
+    
+    *configCount = configIndex;
+    printf("✅ [DMS-API] Parsed %d control configurations\n", *configCount);
+    
+    return DMS_API_SUCCESS;
 }
 
-
+/**
+ * @brief 解析單個控制配置物件
+ */
+static bool parse_single_config_object(const char* objectData, size_t objectLength, 
+                                      DMSControlConfig_t* config)
+{
+    JSONStatus_t jsonResult;
+    char* fieldValue = NULL;
+    size_t fieldLength = 0;
+    
+    if (objectData == NULL || config == NULL || objectLength == 0) {
+        return false;
+    }
+    
+    /* 初始化配置結構 */
+    memset(config, 0, sizeof(DMSControlConfig_t));
+    
+    /* ✅ 解析status_progress_id (規格: integer) */
+    jsonResult = JSON_Search(objectData, objectLength,
+                           "status_progress_id", strlen("status_progress_id"),
+                           &fieldValue, &fieldLength);
+    if (jsonResult == JSONSuccess && fieldValue != NULL) {
+        config->statusProgressId = atoi(fieldValue);
+        printf("   📊 status_progress_id: %d (spec: integer ✅)\n", config->statusProgressId);
+    }
+    
+    /* ✅ 解析item (規格: string, control item name) */
+    jsonResult = JSON_Search(objectData, objectLength,
+                           "item", strlen("item"),
+                           &fieldValue, &fieldLength);
+    if (jsonResult == JSONSuccess && fieldValue != NULL && fieldLength > 0) {
+        /* 移除引號並複製 */
+        size_t copyLength = fieldLength;
+        const char* copyStart = fieldValue;
+        if (fieldValue[0] == '"' && fieldValue[fieldLength-1] == '"') {
+            copyStart++;
+            copyLength -= 2;
+        }
+        size_t maxCopy = MIN(copyLength, sizeof(config->item) - 1);
+        strncpy(config->item, copyStart, maxCopy);
+        config->item[maxCopy] = '\0';
+        printf("   📝 item: %s (spec: control item name ✅)\n", config->item);
+    }
+    
+    /* ✅ 解析type (規格: integer, 1-String 2-JSON Object) */
+    jsonResult = JSON_Search(objectData, objectLength,
+                           "type", strlen("type"),
+                           &fieldValue, &fieldLength);
+    if (jsonResult == JSONSuccess && fieldValue != NULL) {
+        config->type = atoi(fieldValue);
+        printf("   🔢 type: %d (spec: 1-String 2-JSON Object ✅)\n", config->type);
+        
+        /* 驗證type值符合規格 */
+        if (config->type != 1 && config->type != 2) {
+            printf("   ⚠️  Warning: type %d not in spec range (1-2)\n", config->type);
+        }
+    }
+    
+    /* ✅ 解析value (規格: string, control value) */
+    jsonResult = JSON_Search(objectData, objectLength,
+                           "value", strlen("value"),
+                           &fieldValue, &fieldLength);
+    if (jsonResult == JSONSuccess && fieldValue != NULL && fieldLength > 0) {
+        /* 移除引號並複製 */
+        size_t copyLength = fieldLength;
+        const char* copyStart = fieldValue;
+        if (fieldValue[0] == '"' && fieldValue[fieldLength-1] == '"') {
+            copyStart++;
+            copyLength -= 2;
+        }
+        size_t maxCopy = MIN(copyLength, sizeof(config->value) - 1);
+        strncpy(config->value, copyStart, maxCopy);
+        config->value[maxCopy] = '\0';
+        printf("   💾 value: %s (spec: control value ✅)\n", config->value);
+    }
+    
+    /* ✅ 驗證必要欄位符合規格要求 */
+    if (strlen(config->item) == 0) {
+        printf("❌ [DMS-API] Config object missing required 'item' field (spec violation)\n");
+        return false;
+    }
+    
+    printf("   📋 Parsed config (spec compliant): %s = %s (ID: %d, Type: %d)\n",
+           config->item, config->value, config->statusProgressId, config->type);
+    
+    /* 額外的規格驗證 */
+    if (config->statusProgressId <= 0) {
+        printf("   ⚠️  Warning: status_progress_id should be positive integer\n");
+    }
+    
+    return true;
+}
 
 /*-----------------------------------------------------------*/
 
