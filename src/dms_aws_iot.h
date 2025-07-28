@@ -254,4 +254,32 @@ void dms_aws_iot_event_callback(MQTTContext_t* pMqttContext,
                                MQTTPacketInfo_t* pPacketInfo,
                                MQTTDeserializedInfo_t* pDeserializedInfo);
 
+
+
+
+
+/**
+ * @brief 驗證 callback 是否已正確註冊
+ * @return true 如果已註冊，false 如果未註冊
+ */
+bool dms_aws_iot_verify_callback_registered(void);
+
+/**
+ * @brief 檢查 AWS IoT 模組是否完全初始化
+ * @return true 如果已初始化，false 如果未初始化
+ */
+bool dms_aws_iot_is_initialized(void);
+
+/**
+ * @brief 測試 Shadow delta 處理 (僅供測試使用)
+ * @return 成功返回 DMS_SUCCESS，失敗返回錯誤碼
+ */
+dms_result_t dms_aws_iot_test_shadow_delta_processing(void);
+
+
+
+
+
+
+
 #endif /* DMS_AWS_IOT_H_ */

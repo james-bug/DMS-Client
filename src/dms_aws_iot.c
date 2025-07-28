@@ -257,30 +257,62 @@ dms_result_t dms_aws_iot_establish_mqtt(void)
     return DMS_SUCCESS;
 }
 
+
+
 void dms_aws_iot_event_callback(MQTTContext_t* pMqttContext,
                                MQTTPacketInfo_t* pPacketInfo,
                                MQTTDeserializedInfo_t* pDeserializedInfo)
 {
-    /* 這是原始 eventCallback() 函數的直接移植 */
-    (void) pMqttContext;
+    (void)pMqttContext;
+    
+    if (pPacketInfo == NULL || pDeserializedInfo == NULL) {
+        DMS_LOG_ERROR("❌ NULL packet info or deserialized info in event callback");
+        return;
+    }
 
     switch (pPacketInfo->type) {
         case MQTT_PACKET_TYPE_PUBLISH:
-            /* 處理接收到的 PUBLISH 訊息 */
-            if (pDeserializedInfo->pPublishInfo != NULL) {
-                const char* topic = (const char*)pDeserializedInfo->pPublishInfo->pTopicName;
-                const char* payload = (const char*)pDeserializedInfo->pPublishInfo->pPayload;
-                size_t payload_length = pDeserializedInfo->pPublishInfo->payloadLength;
+            {
+                if (pDeserializedInfo->pPublishInfo == NULL) {
+                    DMS_LOG_ERROR("❌ NULL publish info in PUBLISH packet");
+                    break;
+                }
 
-                DMS_LOG_MQTT("📨 Received PUBLISH message");
-                DMS_LOG_DEBUG("   Topic: %.*s",
-                            (int)pDeserializedInfo->pPublishInfo->topicNameLength,
-                            topic);
+                MQTTPublishInfo_t* pPublishInfo = pDeserializedInfo->pPublishInfo;
+                
+                if (pPublishInfo->pTopicName == NULL || pPublishInfo->pPayload == NULL) {
+                    DMS_LOG_ERROR("❌ NULL topic name or payload in PUBLISH packet");
+                    break;
+                }
+
+                /* 準備 topic 字串 (需要 null-terminated) */
+                char topic[256];
+                size_t topic_len = pPublishInfo->topicNameLength;
+                if (topic_len >= sizeof(topic)) {
+                    topic_len = sizeof(topic) - 1;
+                }
+                memcpy(topic, pPublishInfo->pTopicName, topic_len);
+                topic[topic_len] = '\0';
+
+                /* 準備 payload 資料 */
+                const char* payload = (const char*)pPublishInfo->pPayload;
+                size_t payload_length = pPublishInfo->payloadLength;
+
+                DMS_LOG_DEBUG("📨 PUBLISH received:");
+                DMS_LOG_DEBUG("   Topic: %s (len=%zu)", topic, topic_len);
                 DMS_LOG_DEBUG("   Payload length: %zu", payload_length);
 
-                /* 呼叫註冊的訊息回調函數 */
+                /* 檢查 callback 註冊狀態並轉發訊息 */
                 if (g_aws_iot_context.message_callback != NULL) {
+                    DMS_LOG_DEBUG("✅ Forwarding message to registered callback: %p", 
+                                 (void*)g_aws_iot_context.message_callback);
+                    
                     g_aws_iot_context.message_callback(topic, payload, payload_length);
+                } else {
+                    DMS_LOG_ERROR("❌ Message callback is NULL - message lost!");
+                    DMS_LOG_ERROR("   Topic: %s", topic);
+                    DMS_LOG_ERROR("   Payload: %.*s", (int)payload_length, payload);
+                    DMS_LOG_ERROR("   Please check callback registration in initialization sequence");
                 }
             }
             break;
@@ -316,11 +348,11 @@ void dms_aws_iot_event_callback(MQTTContext_t* pMqttContext,
             break;
 
         default:
-            DMS_LOG_DEBUG("🔍 Other MQTT packet type received: %02x",
-                         pPacketInfo->type);
+            DMS_LOG_DEBUG("🔍 Other MQTT packet type received: %02x", pPacketInfo->type);
             break;
     }
 }
+
 
 dms_result_t dms_aws_iot_publish(const char* topic,
                                 const char* payload,
@@ -477,13 +509,33 @@ mqtt_interface_t dms_aws_iot_get_interface(void)
     return interface;
 }
 
+
+
 void dms_aws_iot_register_message_callback(mqtt_message_callback_t callback)
 {
-    if (g_initialized) {
-        g_aws_iot_context.message_callback = callback;
-        DMS_LOG_DEBUG("📝 Message callback registered");
+    if (!g_initialized) {
+        DMS_LOG_ERROR("❌ AWS IoT module not initialized before callback registration");
+        return;
+    }
+    
+    if (callback == NULL) {
+        DMS_LOG_ERROR("❌ NULL callback function provided");
+        return;
+    }
+    
+    DMS_LOG_DEBUG("📝 Registering message callback: %p", (void*)callback);
+    
+    g_aws_iot_context.message_callback = callback;
+    
+    /* 驗證註冊成功 */
+    if (g_aws_iot_context.message_callback == callback) {
+        DMS_LOG_INFO("✅ Message callback registered successfully: %p", (void*)callback);
+    } else {
+        DMS_LOG_ERROR("❌ Callback registration verification failed");
     }
 }
+
+
 
 aws_iot_connection_state_t dms_aws_iot_get_state(void)
 {
@@ -590,3 +642,52 @@ static dms_result_t convert_openssl_status_to_dms_result(int openssl_status)
     }
 }
 
+
+/**
+ * @brief 驗證 callback 是否已正確註冊
+ */
+bool dms_aws_iot_verify_callback_registered(void)
+{
+    bool is_registered = (g_aws_iot_context.message_callback != NULL);
+    DMS_LOG_DEBUG("🔍 Callback registration status: %s (ptr=%p)",
+                 is_registered ? "REGISTERED" : "NOT_REGISTERED",
+                 (void*)g_aws_iot_context.message_callback);
+    return is_registered;
+}
+
+/**
+ * @brief 檢查 AWS IoT 模組是否完全初始化
+ */
+bool dms_aws_iot_is_initialized(void)
+{
+    return g_initialized;
+}
+
+/**
+ * @brief 測試 Shadow delta 處理 (僅供測試使用)
+ */
+dms_result_t dms_aws_iot_test_shadow_delta_processing(void)
+{
+    const char* test_delta = "{"
+        "\"state\": {"
+        "\"desired\": {"
+        "\"control-config-change\": 1"
+        "}"
+        "}"
+        "}";
+
+    DMS_LOG_INFO("🧪 Testing Shadow delta processing...");
+
+    if (g_aws_iot_context.message_callback != NULL) {
+        DMS_LOG_INFO("✅ Callback is registered, testing direct call...");
+        g_aws_iot_context.message_callback(
+            "$aws/things/" CLIENT_IDENTIFIER "/shadow/update/delta",
+            test_delta,
+            strlen(test_delta)
+        );
+        return DMS_SUCCESS;
+    } else {
+        DMS_LOG_ERROR("❌ Callback not registered for testing");
+        return DMS_ERROR_SHADOW_FAILURE;
+    }
+}
