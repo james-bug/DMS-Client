@@ -29,13 +29,13 @@ static char g_base_url[DMS_API_MAX_URL_SIZE] = DMS_API_BASE_URL_TEST;
 
 
 /* 前置聲明和輔助函數 */
-static DMSAPIResult_t parse_control_config_response(const char* jsonData, 
+static DMSAPIResult_t parse_control_config_response(char* jsonData, 
                                                    size_t jsonSize,
                                                    DMSControlConfig_t* configs,
                                                    int maxConfigs,
                                                    int* configCount);
 
-static bool parse_single_config_object(const char* objectData, size_t objectLength, 
+static bool parse_single_config_object(char* objectData, size_t objectLength, 
                                       DMSControlConfig_t* config);
 
 #ifndef MIN
@@ -240,7 +240,7 @@ DMSAPIResult_t dms_http_request(DMSHTTPMethod_t method,
     
     /* ✅ 修正：分別建立每個header字串 */
     char timestamp_header[128];
-    char signature_header[256];
+    char signature_header[512];
     char product_type_header[128];
     char content_type_header[] = "Content-Type: application/json";
     char accept_header[] = "Accept: application/json";
@@ -499,7 +499,7 @@ DMSAPIResult_t dms_api_control_config_list(const char* uniqueId,
  * @brief 解析控制配置的JSON回應 (完整實現版本)
  * 使用現有的core_json庫解析control-config-list API回應
  */
-static DMSAPIResult_t parse_control_config_response(const char* jsonData, 
+static DMSAPIResult_t parse_control_config_response(char* jsonData, 
                                                    size_t jsonSize,
                                                    DMSControlConfig_t* configs,
                                                    int maxConfigs,
@@ -559,19 +559,19 @@ static DMSAPIResult_t parse_control_config_response(const char* jsonData,
     
     /* ✅ 解析陣列中的每個配置項目 */
     /* 簡化的陣列解析：尋找每個配置物件 */
-    const char* searchPos = configsArrayValue;
+    char* searchPos = configsArrayValue;
     size_t remainingLength = configsArrayLength;
     int configIndex = 0;
     
     while (configIndex < maxConfigs && remainingLength > 0) {
         /* 尋找下一個物件的開始 */
-        const char* objectStart = strstr(searchPos, "{");
+        char* objectStart = strstr(searchPos, "{");
         if (objectStart == NULL || objectStart >= searchPos + remainingLength) {
             break;
         }
         
         /* 尋找對應的物件結束 */
-        const char* objectEnd = strstr(objectStart, "}");
+        char* objectEnd = strstr(objectStart, "}");
         if (objectEnd == NULL || objectEnd >= searchPos + remainingLength) {
             break;
         }
@@ -602,7 +602,7 @@ static DMSAPIResult_t parse_control_config_response(const char* jsonData,
 /**
  * @brief 解析單個控制配置物件
  */
-static bool parse_single_config_object(const char* objectData, size_t objectLength, 
+static bool parse_single_config_object(char* objectData, size_t objectLength, 
                                       DMSControlConfig_t* config)
 {
     JSONStatus_t jsonResult;

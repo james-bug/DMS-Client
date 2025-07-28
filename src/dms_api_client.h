@@ -34,8 +34,8 @@
 
 /* 回應緩衝區大小 */
 #define DMS_API_MAX_RESPONSE_SIZE     4096
-#define DMS_API_MAX_URL_SIZE          512
-#define DMS_API_MAX_PAYLOAD_SIZE      2048
+#define DMS_API_MAX_URL_SIZE          1024
+#define DMS_API_MAX_PAYLOAD_SIZE      4096
 
 /*-----------------------------------------------------------*/
 
