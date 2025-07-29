@@ -258,99 +258,131 @@ dms_result_t dms_aws_iot_establish_mqtt(void)
 }
 
 
-
 void dms_aws_iot_event_callback(MQTTContext_t* pMqttContext,
                                MQTTPacketInfo_t* pPacketInfo,
                                MQTTDeserializedInfo_t* pDeserializedInfo)
 {
     (void)pMqttContext;
     
+    /* 🚨 直接使用 printf，無視日誌級別 */
+    printf("🎯🎯🎯 EVENT CALLBACK TRIGGERED! packet_type=%d 🎯🎯🎯\n", 
+           pPacketInfo ? pPacketInfo->type : -1);
+    fflush(stdout);
+    
     if (pPacketInfo == NULL || pDeserializedInfo == NULL) {
-        DMS_LOG_ERROR("❌ NULL packet info or deserialized info in event callback");
+        printf("❌ NULL packet info or deserialized info in event callback\n");
+        fflush(stdout);
         return;
     }
 
-    switch (pPacketInfo->type) {
-        case MQTT_PACKET_TYPE_PUBLISH:
-            {
-                if (pDeserializedInfo->pPublishInfo == NULL) {
-                    DMS_LOG_ERROR("❌ NULL publish info in PUBLISH packet");
-                    break;
-                }
+    printf("📦 Processing packet type: %d (0x%02X)\n", pPacketInfo->type, pPacketInfo->type);
+    fflush(stdout);
 
-                MQTTPublishInfo_t* pPublishInfo = pDeserializedInfo->pPublishInfo;
-                
-                if (pPublishInfo->pTopicName == NULL || pPublishInfo->pPayload == NULL) {
-                    DMS_LOG_ERROR("❌ NULL topic name or payload in PUBLISH packet");
-                    break;
-                }
+    /* 🔧 修正：檢查封包類型的位元模式，而不是精確匹配 */
+    uint8_t packet_type = pPacketInfo->type;
+    uint8_t message_type = (packet_type >> 4) & 0x0F;  // 取得高4位
+    
+    printf("🔍 Packet analysis:\n");
+    printf("   Raw type: %d (0x%02X)\n", packet_type, packet_type);
+    printf("   Message type: %d\n", message_type);
+    fflush(stdout);
 
-                /* 準備 topic 字串 (需要 null-terminated) */
-                char topic[256];
-                size_t topic_len = pPublishInfo->topicNameLength;
-                if (topic_len >= sizeof(topic)) {
-                    topic_len = sizeof(topic) - 1;
-                }
-                memcpy(topic, pPublishInfo->pTopicName, topic_len);
-                topic[topic_len] = '\0';
+    /* MQTT PUBLISH 訊息的類型是 3 (0x3) */
+    if (message_type == 3) {
+        printf("📨📨📨 MQTT PUBLISH MESSAGE DETECTED! 📨📨📨\n");
+        fflush(stdout);
+        
+        if (pDeserializedInfo->pPublishInfo == NULL) {
+            printf("❌ NULL publish info in PUBLISH packet\n");
+            fflush(stdout);
+            return;
+        }
 
-                /* 準備 payload 資料 */
-                const char* payload = (const char*)pPublishInfo->pPayload;
-                size_t payload_length = pPublishInfo->payloadLength;
+        MQTTPublishInfo_t* pPublishInfo = pDeserializedInfo->pPublishInfo;
+        
+        if (pPublishInfo->pTopicName == NULL || pPublishInfo->pPayload == NULL) {
+            printf("❌ NULL topic name or payload in PUBLISH packet\n");
+            fflush(stdout);
+            return;
+        }
 
-                DMS_LOG_DEBUG("📨 PUBLISH received:");
-                DMS_LOG_DEBUG("   Topic: %s (len=%zu)", topic, topic_len);
-                DMS_LOG_DEBUG("   Payload length: %zu", payload_length);
+        /* 準備 topic 字串 */
+        char topic[256];
+        size_t topic_len = pPublishInfo->topicNameLength;
+        if (topic_len >= sizeof(topic)) {
+            topic_len = sizeof(topic) - 1;
+        }
+        memcpy(topic, pPublishInfo->pTopicName, topic_len);
+        topic[topic_len] = '\0';
 
-                /* 檢查 callback 註冊狀態並轉發訊息 */
-                if (g_aws_iot_context.message_callback != NULL) {
-                    DMS_LOG_DEBUG("✅ Forwarding message to registered callback: %p", 
-                                 (void*)g_aws_iot_context.message_callback);
-                    
-                    g_aws_iot_context.message_callback(topic, payload, payload_length);
-                } else {
-                    DMS_LOG_ERROR("❌ Message callback is NULL - message lost!");
-                    DMS_LOG_ERROR("   Topic: %s", topic);
-                    DMS_LOG_ERROR("   Payload: %.*s", (int)payload_length, payload);
-                    DMS_LOG_ERROR("   Please check callback registration in initialization sequence");
-                }
-            }
-            break;
+        /* 準備 payload 資料 */
+        const char* payload = (const char*)pPublishInfo->pPayload;
+        size_t payload_length = pPublishInfo->payloadLength;
 
-        case MQTT_PACKET_TYPE_SUBACK:
-            DMS_LOG_MQTT("✅ SUBACK received for packet ID: %u",
-                        pDeserializedInfo->packetIdentifier);
-            break;
+        printf("🎯🎯🎯 PUBLISH MESSAGE DETAILS: 🎯🎯🎯\n");
+        printf("   📍 Topic: %s\n", topic);
+        printf("   📏 Topic length: %zu\n", topic_len);
+        printf("   📦 Payload length: %zu\n", payload_length);
+        printf("   📄 Payload preview: %.200s\n", payload);
+        fflush(stdout);
 
-        case MQTT_PACKET_TYPE_UNSUBACK:
-            DMS_LOG_MQTT("✅ UNSUBACK received for packet ID: %u",
-                        pDeserializedInfo->packetIdentifier);
-            break;
+        /* 🔥 檢查是否為 Shadow Delta */
+        if (strstr(topic, "/shadow/update/delta") != NULL) {
+            printf("🔥🔥🔥🔥🔥 SHADOW DELTA MESSAGE FOUND! 🔥🔥🔥🔥🔥\n");
+            printf("   🔗 Full topic: %s\n", topic);
+            printf("   📄 Full payload: %s\n", payload);
+            fflush(stdout);
+        }
 
-        case MQTT_PACKET_TYPE_PUBACK:
-            DMS_LOG_MQTT("✅ PUBACK received for packet ID: %u",
-                        pDeserializedInfo->packetIdentifier);
-            break;
+        /* 🔥 檢查其他 Shadow 主題 */
+        if (strstr(topic, "/shadow/get/accepted") != NULL) {
+            printf("✅ Shadow GET ACCEPTED detected!\n");
+            fflush(stdout);
+        }
+        if (strstr(topic, "/shadow/update/accepted") != NULL) {
+            printf("✅ Shadow UPDATE ACCEPTED detected!\n");
+            fflush(stdout);
+        }
 
-        case MQTT_PACKET_TYPE_PUBREC:
-            DMS_LOG_MQTT("📝 PUBREC received for packet ID: %u",
-                        pDeserializedInfo->packetIdentifier);
-            break;
+        /* 檢查並轉發訊息 */
+        printf("🔍 Message callback status:\n");
+        printf("   📞 Callback pointer: %p\n", (void*)g_aws_iot_context.message_callback);
+        printf("   ❓ Is NULL: %s\n", g_aws_iot_context.message_callback ? "NO" : "YES");
+        fflush(stdout);
 
-        case MQTT_PACKET_TYPE_PUBREL:
-            DMS_LOG_MQTT("📝 PUBREL received for packet ID: %u",
-                        pDeserializedInfo->packetIdentifier);
-            break;
-
-        case MQTT_PACKET_TYPE_PUBCOMP:
-            DMS_LOG_MQTT("✅ PUBCOMP received for packet ID: %u",
-                        pDeserializedInfo->packetIdentifier);
-            break;
-
-        default:
-            DMS_LOG_DEBUG("🔍 Other MQTT packet type received: %02x", pPacketInfo->type);
-            break;
+        if (g_aws_iot_context.message_callback != NULL) {
+            printf("🚀🚀🚀 FORWARDING MESSAGE TO SHADOW HANDLER! 🚀🚀🚀\n");
+            fflush(stdout);
+            
+            g_aws_iot_context.message_callback(topic, payload, payload_length);
+            
+            printf("✅✅✅ MESSAGE FORWARDED SUCCESSFULLY! ✅✅✅\n");
+            fflush(stdout);
+        } else {
+            printf("❌❌❌ CRITICAL ERROR: MESSAGE CALLBACK IS NULL! ❌❌❌\n");
+            printf("   🚨 This PUBLISH message will be LOST!\n");
+            printf("   📍 Lost topic: %s\n", topic);
+            fflush(stdout);
+        }
     }
+    else {
+        /* 處理其他封包類型 */
+        switch (packet_type) {
+            case 0x90:  /* SUBACK */
+                printf("✅ SUBACK received (subscription confirmed)\n");
+                break;
+            case 0x40:  /* PUBACK */
+                printf("✅ PUBACK received (publish confirmed)\n");
+                break;
+            default:
+                printf("📦 Other packet type: %d (0x%02X)\n", packet_type, packet_type);
+                break;
+        }
+        fflush(stdout);
+    }
+
+    printf("🏁 Event callback processing completed for packet type %d\n", packet_type);
+    fflush(stdout);
 }
 
 
