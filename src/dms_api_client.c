@@ -246,6 +246,8 @@ DMSAPIResult_t dms_http_request(DMSHTTPMethod_t method,
     char accept_header[] = "Accept: application/json";
     
     DMSAPIResult_t result = DMS_API_SUCCESS;
+    int retry_count = 0;
+    bool should_retry = false;
 
     if (url == NULL || response == NULL) {
         return DMS_API_ERROR_INVALID_PARAM;
@@ -266,141 +268,169 @@ DMSAPIResult_t dms_http_request(DMSHTTPMethod_t method,
         return DMS_API_ERROR_NETWORK;
     }
 
-    /* 生成時間戳 */
-    uint32_t timestamp = (uint32_t)time(NULL);
-    snprintf(timestamp_str, sizeof(timestamp_str), "%u", timestamp);
+    /* ✅ 重試循環：處理 HTTP 405 時間戳過期問題 */
+    do {
+        should_retry = false;
+        
+        /* ✅ 每次重試都重新生成時間戳 - 關鍵修正！ */
+        uint32_t timestamp = (uint32_t)time(NULL);
+        snprintf(timestamp_str, sizeof(timestamp_str), "%u", timestamp);
 
-    /* 生成簽名 */
-    if (dms_generate_hmac_sha1_signature(timestamp_str, DMS_API_PRODUCT_KEY,
-                                        signature, sizeof(signature)) != DMS_API_SUCCESS) {
-        printf("❌ [DMS-API] Failed to generate signature\n");
-        result = DMS_API_ERROR_AUTH;
-        goto cleanup;
-    }
+        printf("🕒 [DMS-API] Using timestamp: %s (attempt %d/%d)\n", 
+               timestamp_str, retry_count + 1, DMS_HTTP_RETRY_MAX_ATTEMPTS + 1);
 
-    /* ✅ 修正：分別建立每個header，不使用\r\n */
-    snprintf(product_type_header, sizeof(product_type_header),
-             "Product-Type: %s", DMS_API_PRODUCT_TYPE);
-    snprintf(timestamp_header, sizeof(timestamp_header),
-             "Signature-Time: %s", timestamp_str);
-    snprintf(signature_header, sizeof(signature_header),
-             "Signature: %s", signature);
-
-    /* ✅ 修正：分別添加每個header */
-    headers = curl_slist_append(headers, product_type_header);
-    headers = curl_slist_append(headers, accept_header);
-    headers = curl_slist_append(headers, timestamp_header);    /* 分別添加 */
-    headers = curl_slist_append(headers, signature_header);    /* 分別添加 */
-
-    /* Content-Type僅在POST方法時添加 */
-    if (method == DMS_HTTP_POST && payload != NULL) {
-        headers = curl_slist_append(headers, content_type_header);
-    }
-
-    /* 設定 CURL 選項 */
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void*)&chunk);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, DMS_HTTP_USER_AGENT);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, DMS_HTTP_TIMEOUT_MS);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-
-    if (method == DMS_HTTP_POST) {
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        if (payload != NULL) {
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(payload));
+        /* 生成簽名 */
+        if (dms_generate_hmac_sha1_signature(timestamp_str, DMS_API_PRODUCT_KEY,
+                                            signature, sizeof(signature)) != DMS_API_SUCCESS) {
+            printf("❌ [DMS-API] Failed to generate signature\n");
+            result = DMS_API_ERROR_AUTH;
+            goto cleanup;
         }
-    }
 
-    printf("🌐 [DMS-API] Sending %s request to: %s\n",
-           (method == DMS_HTTP_POST) ? "POST" : "GET", url);
-    printf("🔐 [DMS-API] Headers: Product-Type=%s, Signature-Time=%s\n", 
-           DMS_API_PRODUCT_TYPE, timestamp_str);
-    if (payload != NULL) {
-        printf("📤 [DMS-API] Payload: %s\n", payload);
-    }
+        /* ✅ 修正：分別建立每個header，不使用\r\n */
+        snprintf(product_type_header, sizeof(product_type_header),
+                 "Product-Type: %s", DMS_API_PRODUCT_TYPE);
+        snprintf(timestamp_header, sizeof(timestamp_header),
+                 "Signature-Time: %s", timestamp_str);
+        snprintf(signature_header, sizeof(signature_header),
+                 "Signature: %s", signature);
 
-    printf("🔐 [DMS-API] === DIAGNOSTIC: Complete Headers List ===\n");
-    printf("🔐 [DMS-API] Generated signature: %s\n", signature);
-    printf("🔐 [DMS-API] Product key: %s\n", DMS_API_PRODUCT_KEY);
-    printf("🔐 [DMS-API] Timestamp: %s\n", timestamp_str);
+        /* 清理舊的 headers */
+        if (headers != NULL) {
+            curl_slist_free_all(headers);
+            headers = NULL;
+        }
 
-    /* 列出所有 headers */
-    struct curl_slist* current = headers;
-    int header_count = 1;
-    while (current) {
-    	printf("🔐 [DMS-API] Header %d: %s\n", header_count++, current->data);
-    	current = current->next;
-    }
-    printf("🔐 [DMS-API] === END DIAGNOSTIC ===\n");
-    
+        /* ✅ 修正：分別添加每個header */
+        headers = curl_slist_append(headers, product_type_header);
+        headers = curl_slist_append(headers, accept_header);
+        headers = curl_slist_append(headers, timestamp_header);
+        headers = curl_slist_append(headers, signature_header);
 
-    /* 執行請求 */
-    res = curl_easy_perform(curl);
+        /* Content-Type僅在POST方法時添加 */
+        if (method == DMS_HTTP_POST && payload != NULL) {
+            headers = curl_slist_append(headers, content_type_header);
+        }
 
-    if (res != CURLE_OK) {
-        printf("❌ [DMS-API] HTTP request failed: %s\n", curl_easy_strerror(res));
-        snprintf(response->errorMessage, sizeof(response->errorMessage),
-                 "HTTP request failed: %s", curl_easy_strerror(res));
-        result = DMS_API_ERROR_NETWORK;
-        goto cleanup;
-    }
+        /* 設定 CURL 選項 */
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void*)&chunk);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, DMS_HTTP_USER_AGENT);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, DMS_HTTP_TIMEOUT_MS);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
 
-    /* 取得 HTTP 狀態碼 */
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response->httpCode);
+        if (method == DMS_HTTP_POST) {
+            curl_easy_setopt(curl, CURLOPT_POST, 1L);
+            if (payload != NULL) {
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(payload));
+            }
+        }
+
+        printf("🌐 [DMS-API] Sending %s request to: %s\n",
+               (method == DMS_HTTP_POST) ? "POST" : "GET", url);
+        printf("🔐 [DMS-API] Headers: Product-Type=%s, Signature-Time=%s\n", 
+               DMS_API_PRODUCT_TYPE, timestamp_str);
+        if (payload != NULL) {
+            printf("📤 [DMS-API] Payload: %s\n", payload);
+        }
+
+        /* 清理之前的回應數據 */
+        if (chunk.memory != NULL && chunk.size > 0) {
+            free(chunk.memory);
+            chunk.memory = malloc(1);
+            chunk.size = 0;
+        }
+
+        /* 執行請求 */
+        res = curl_easy_perform(curl);
+
+        if (res != CURLE_OK) {
+            printf("❌ [DMS-API] HTTP request failed: %s\n", curl_easy_strerror(res));
+            snprintf(response->errorMessage, sizeof(response->errorMessage),
+                     "HTTP request failed: %s", curl_easy_strerror(res));
+            result = DMS_API_ERROR_NETWORK;
+            goto cleanup;
+        }
+
+        /* 取得 HTTP 狀態碼 */
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response->httpCode);
+
+        printf("📡 [DMS-API] HTTP %ld, Response size: %zu bytes\n",
+               response->httpCode, response->dataSize);
+
+        /* ✅ 關鍵修正：HTTP 405 重試邏輯 */
+        if (response->httpCode == 405) {
+            retry_count++;
+            if (retry_count < DMS_HTTP_RETRY_MAX_ATTEMPTS) {
+                printf("⏰ [DMS-API] HTTP 405 detected (likely timestamp expired)\n");
+                printf("🔄 [DMS-API] Retrying with fresh timestamp... (attempt %d/%d)\n", 
+                       retry_count + 1, DMS_HTTP_RETRY_MAX_ATTEMPTS + 1);
+                
+                /* 短暫延遲，確保時間戳更新 */
+                struct timespec delay = {0, DMS_HTTP_RETRY_DELAY_MS * 1000000}; // 轉換為奈秒
+                nanosleep(&delay, NULL);
+                
+                should_retry = true;
+                continue;
+            } else {
+                printf("❌ [DMS-API] HTTP 405 persists after %d retries\n", DMS_HTTP_RETRY_MAX_ATTEMPTS);
+                printf("💡 [DMS-API] This may indicate API endpoint is disabled in test environment\n");
+                result = DMS_API_ERROR_HTTP;
+            }
+        }
+
+        /* 處理其他 HTTP 狀態碼 */
+        if (response->httpCode == 200) {
+            response->result = DMS_API_SUCCESS;
+            printf("✅ [DMS-API] Request successful");
+            if (retry_count > 0) {
+                printf(" (succeeded after %d retries)", retry_count);
+            }
+            printf("\n");
+            
+            if (response->dataSize > 0) {
+                printf("📋 [DMS-API] Response: %.100s%s\n", response->data,
+                       (response->dataSize > 100) ? "..." : "");
+            }
+        } else if (response->httpCode == 401) {
+            printf("❌ [DMS-API] HTTP 401 - Authentication failed\n");
+            printf("🔍 [DMS-API] Check HMAC-SHA1 signature or timestamp validity\n");
+            result = DMS_API_ERROR_AUTH;
+        } else if (response->httpCode == 422) {
+            printf("❌ [DMS-API] HTTP 422 - Validation error\n");
+            if (response->dataSize > 0) {
+                printf("📋 [DMS-API] Error details: %.200s\n", response->data);
+            }
+            result = DMS_API_ERROR_SERVER;
+        } else {
+            printf("❌ [DMS-API] HTTP error: %ld\n", response->httpCode);
+            if (response->dataSize > 0) {
+                printf("📋 [DMS-API] Error response: %.200s\n", response->data);
+            }
+            result = DMS_API_ERROR_HTTP;
+        }
+
+    } while (should_retry);
 
     /* 設定回應資料 */
     response->data = chunk.memory;
     response->dataSize = chunk.size;
 
-    printf("📡 [DMS-API] HTTP %ld, Response size: %zu bytes\n",
-           response->httpCode, response->dataSize);
-
-    if (response->httpCode == 200) {
-        response->result = DMS_API_SUCCESS;
-        printf("✅ [DMS-API] Request successful\n");
-        if (response->dataSize > 0) {
-            printf("📋 [DMS-API] Response: %.*s\n",
-                   (int)response->dataSize, response->data);
-        }
-    } else {
-        response->result = DMS_API_ERROR_HTTP;
-        snprintf(response->errorMessage, sizeof(response->errorMessage),
-                 "HTTP error: %ld", response->httpCode);
-        printf("❌ [DMS-API] HTTP error: %ld\n", response->httpCode);
-
-        /* 顯示錯誤回應內容 */
-        if (response->dataSize > 0) {
-            printf("📋 [DMS-API] Error response: %.*s\n",
-                   (int)response->dataSize, response->data);
-        }
-    }
-
-    result = response->result;
-
 cleanup:
-    if (headers) {
+    if (headers != NULL) {
         curl_slist_free_all(headers);
     }
-
-    if (curl) {
-        curl_easy_cleanup(curl);
-    }
-
-    /* 如果發生錯誤，釋放記憶體 */
-    if (result != DMS_API_SUCCESS && chunk.memory) {
-        free(chunk.memory);
-        response->data = NULL;
-        response->dataSize = 0;
-    }
-
+    curl_easy_cleanup(curl);
+    
+    /* 注意：不要在這裡釋放 chunk.memory，因為它會被回傳給呼叫者 */
+    
     return result;
 }
-
 
 /*-----------------------------------------------------------*/
 /**
