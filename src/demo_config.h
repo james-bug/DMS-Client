@@ -68,14 +68,14 @@
 
 /* 重連配置 */
 #define MAX_RETRY_ATTEMPTS                ( 10 )
-#define RETRY_BACKOFF_BASE_SECONDS        ( 2 )
-#define RETRY_BACKOFF_MAX_SECONDS         ( 300 )
+#define RETRY_BACKOFF_BASE_SECONDS        ( 3 )
+#define RETRY_BACKOFF_MAX_SECONDS         ( 900 )
 #define CONNECTION_RETRY_DELAY_MS         ( 1000 )
 
 
 /* 新增：基於 MAC 地址的隨機退避配置 */
-#define MAC_SEED_MULTIPLIER                ( 1 )    /* MAC seed 權重 */
-#define MAC_SEED_MAX_OFFSET                ( 10 )   /* 最大隨機偏移（秒）*/
+#define MAC_SEED_MULTIPLIER                ( 2 )    /* MAC seed 權重 */
+#define MAC_SEED_MAX_OFFSET                ( 120 )   /* 最大隨機偏移（秒）*/
 
 
 /* AWS IoT SDK 版本 */
@@ -112,6 +112,154 @@
 #else
     #define DMS_DEBUG_PRINT(fmt, ...)    do {} while(0)
 #endif
+
+
+/* DMS AES 解密相關常數 */
+#define DMS_AES_KEY_SIZE              16
+#define DMS_AES_IV_SIZE               16
+#define DMS_AES_BLOCK_SIZE            16
+
+/* DMS 加密參數 - 根據 API 文檔 */
+#define DMS_AES_KEY                   "NBWTF9EYV8pRHhAz"
+#define DMS_AES_IV                    "TNFbj2fha4ZJVDFF"
+
+
+/* 功能宏定義 */
+#define ARRAY_SIZE(x)                     (sizeof(x) / sizeof((x)[0]))
+#define MIN(a, b)                         ((a) < (b) ? (a) : (b))
+#define MAX(a, b)                         ((a) > (b) ? (a) : (b))
+
+/* JSON 解析相關宏 */
+#define MAX_JSON_BUFFER_SIZE              ( 1024 )
+#define MAX_JSON_KEY_LENGTH               ( 128 )
+#define MAX_JSON_VALUE_LENGTH             ( 256 )
+
+/* DMS 命令相關宏 */
+#define DMS_COMMAND_KEY_CONTROL_CONFIG    "control-config-change"
+#define DMS_COMMAND_KEY_UPLOAD_LOGS       "upload_logs"
+#define DMS_COMMAND_KEY_FW_UPGRADE        "fw_upgrade"
+
+/* JSON 查詢路徑 */
+#define JSON_QUERY_DESIRED_STATE          "state.desired"
+#define JSON_QUERY_CONTROL_CONFIG         "state.control-config-change"
+#define JSON_QUERY_UPLOAD_LOGS           "state.upload_logs"
+#define JSON_QUERY_FW_UPGRADE            "state.fw_upgrade"
+
+
+/* Shadow 綁定資訊查詢路徑 */
+#define JSON_QUERY_REPORTED_INFO          "state.reported.info"
+#define JSON_QUERY_COMPANY_NAME           "state.reported.info.company_name"
+#define JSON_QUERY_ADDED_BY               "state.reported.info.added_by"
+#define JSON_QUERY_DEVICE_NAME            "state.reported.info.device_name"
+#define JSON_QUERY_COMPANY_ID             "state.reported.info.company_id"
+
+/* Shadow Get 相關 */
+#define SHADOW_GET_TIMEOUT_MS             ( 5000 )
+#define SHADOW_GET_MAX_RETRIES            ( 3 )
+
+/* 字串安全操作 */
+#define SAFE_STRNCPY(dest, src, size)     do { \
+    strncpy(dest, src, size - 1); \
+    dest[size - 1] = '\0'; \
+} while(0)
+
+/* 時間相關宏 */
+#define SECONDS_TO_MS(s)                  ((s) * 1000)
+#define MINUTES_TO_MS(m)                  ((m) * 60 * 1000)
+#define HOURS_TO_MS(h)                    ((h) * 60 * 60 * 1000)
+
+/* Shadow JSON 模板 */
+#define SHADOW_REPORTED_JSON_TEMPLATE \
+    "{"                               \
+    "\"state\":{"                     \
+    "\"reported\":{"                  \
+    "\"connected\":%s,"               \
+    "\"status\":\"%s\","              \
+    "\"uptime\":%u,"                  \
+    "\"timestamp\":%u,"               \
+    "\"firmware\":\"%s\","            \
+    "\"device_type\":\"%s\","         \
+    "\"cpu_usage\":%.2f,"             \
+    "\"memory_usage\":%.2f,"          \
+    "\"network_sent\":%lu,"           \
+    "\"network_received\":%lu"        \
+    "}}}"
+
+/* Shadow 命令重設 JSON 模板 */
+#define SHADOW_RESET_COMMAND_JSON_TEMPLATE \
+    "{"                                    \
+    "\"state\":{"                          \
+    "\"desired\":{"                        \
+    "\"%s\":null"                          \
+    "},"                                   \
+    "\"reported\":{"                       \
+    "\"%s\":0"                             \
+    "}}}"
+
+/* Shadow 命令結果回報 JSON 模板 */
+#define SHADOW_COMMAND_RESULT_JSON_TEMPLATE \
+    "{"                                     \
+    "\"state\":{"                           \
+    "\"reported\":{"                        \
+    "\"%s_result\":%d,"                     \
+    "\"%s_timestamp\":%u"                   \
+    "}}}"
+
+/* 指數退避計算 */
+#define CALCULATE_BACKOFF_DELAY(retry_count) \
+    MIN(RETRY_BACKOFF_BASE_SECONDS * (1 << (retry_count)), RETRY_BACKOFF_MAX_SECONDS)
+
+/* 新的基於 MAC seed 的退避計算宏 */
+#define CALCULATE_BACKOFF_DELAY_WITH_MAC_SEED(retry_count, reconnect_state) \
+    calculateBackoffDelayWithSeed(retry_count, (reconnect_state)->macAddressSeed)
+
+
+/* 設備資訊相關宏定義 */
+#define MAX_DEVICE_MODEL_LENGTH           64
+#define MAX_DEVICE_SERIAL_LENGTH          64
+#define MAX_MAC_ADDRESS_LENGTH            32
+#define MAX_PANEL_LENGTH                  16
+#define MAX_BRAND_LENGTH                  32
+#define MAX_COUNTRY_CODE_LENGTH           8
+#define MAX_FIRMWARE_VERSION_LENGTH       32
+#define MAX_ARCHITECTURE_LENGTH           256
+
+/* Client ID 格式檢查宏 */
+#define DMS_CLIENT_ID_PREFIX              "benq-dms-test-"
+#define DMS_CLIENT_ID_PREFIX_LENGTH       14
+#define DMS_MAC_SUFFIX_LENGTH             12
+
+/* BDID 計算相關宏 */
+#define MAX_BDID_LENGTH                   128
+#define MAX_SOURCE_DATA_LENGTH            128
+
+/* UCI 配置路徑 */
+#define UCI_DMS_PACKAGE                   "dms-client"
+#define UCI_DEVICE_SECTION                "hardware"
+#define UCI_DEVICE_MODEL                  "model"
+#define UCI_DEVICE_SERIAL                 "serial"
+#define UCI_DEVICE_TYPE                   "device_type"
+#define UCI_DEVICE_SUBTYPE                "device_subtype"
+#define UCI_DEVICE_PANEL                  "panel"
+#define UCI_DEVICE_BRAND                  "brand"
+#define UCI_DEVICE_COUNTRY                "country_code"
+
+/* 系統檔案路徑 (OpenWrt 常見位置) */
+#define SYSTEM_MODEL_FILE                 "/proc/device-tree/model"
+#define SYSTEM_SERIAL_FILE                "/proc/device-tree/serial-number"
+#define SYSTEM_CPUINFO_FILE               "/proc/cpuinfo"
+
+
+/* 設備硬體資訊 (預設值 - 可透過 UCI 或系統檔案覆蓋) */
+#define DEFAULT_DEVICE_MODEL              "WDC25"
+#define DEFAULT_DEVICE_SERIAL             "S090Y00000002"
+#define DEFAULT_DEVICE_PANEL              "WW"
+#define DEFAULT_DEVICE_BRAND              "BenQ"
+#define DEFAULT_COUNTRY_CODE              "tw"
+
+
+
+
 
 /* 錯誤碼定義 */
 typedef enum {
@@ -331,153 +479,6 @@ typedef enum {
     DEVICE_REGISTER_STATUS_REGISTERED,
     DEVICE_REGISTER_STATUS_FAILED
 } DeviceRegisterStatus_t;
-
-
-
-/* DMS AES 解密相關常數 */
-#define DMS_AES_KEY_SIZE              16
-#define DMS_AES_IV_SIZE               16
-#define DMS_AES_BLOCK_SIZE            16
-
-/* DMS 加密參數 - 根據 API 文檔 */
-#define DMS_AES_KEY                   "NBWTF9EYV8pRHhAz"
-#define DMS_AES_IV                    "TNFbj2fha4ZJVDFF"
-
-
-/* 功能宏定義 */
-#define ARRAY_SIZE(x)                     (sizeof(x) / sizeof((x)[0]))
-#define MIN(a, b)                         ((a) < (b) ? (a) : (b))
-#define MAX(a, b)                         ((a) > (b) ? (a) : (b))
-
-/* JSON 解析相關宏 */
-#define MAX_JSON_BUFFER_SIZE              ( 1024 )
-#define MAX_JSON_KEY_LENGTH               ( 128 )
-#define MAX_JSON_VALUE_LENGTH             ( 256 )
-
-/* DMS 命令相關宏 */
-#define DMS_COMMAND_KEY_CONTROL_CONFIG    "control-config-change"
-#define DMS_COMMAND_KEY_UPLOAD_LOGS       "upload_logs"
-#define DMS_COMMAND_KEY_FW_UPGRADE        "fw_upgrade"
-
-/* JSON 查詢路徑 */
-#define JSON_QUERY_DESIRED_STATE          "state.desired"
-#define JSON_QUERY_CONTROL_CONFIG         "state.control-config-change"
-#define JSON_QUERY_UPLOAD_LOGS           "state.upload_logs"
-#define JSON_QUERY_FW_UPGRADE            "state.fw_upgrade"
-
-
-/* Shadow 綁定資訊查詢路徑 */
-#define JSON_QUERY_REPORTED_INFO          "state.reported.info"
-#define JSON_QUERY_COMPANY_NAME           "state.reported.info.company_name"
-#define JSON_QUERY_ADDED_BY               "state.reported.info.added_by"
-#define JSON_QUERY_DEVICE_NAME            "state.reported.info.device_name"
-#define JSON_QUERY_COMPANY_ID             "state.reported.info.company_id"
-
-/* Shadow Get 相關 */
-#define SHADOW_GET_TIMEOUT_MS             ( 5000 )
-#define SHADOW_GET_MAX_RETRIES            ( 3 )
-
-/* 字串安全操作 */
-#define SAFE_STRNCPY(dest, src, size)     do { \
-    strncpy(dest, src, size - 1); \
-    dest[size - 1] = '\0'; \
-} while(0)
-
-/* 時間相關宏 */
-#define SECONDS_TO_MS(s)                  ((s) * 1000)
-#define MINUTES_TO_MS(m)                  ((m) * 60 * 1000)
-#define HOURS_TO_MS(h)                    ((h) * 60 * 60 * 1000)
-
-/* Shadow JSON 模板 */
-#define SHADOW_REPORTED_JSON_TEMPLATE \
-    "{"                               \
-    "\"state\":{"                     \
-    "\"reported\":{"                  \
-    "\"connected\":%s,"               \
-    "\"status\":\"%s\","              \
-    "\"uptime\":%u,"                  \
-    "\"timestamp\":%u,"               \
-    "\"firmware\":\"%s\","            \
-    "\"device_type\":\"%s\","         \
-    "\"cpu_usage\":%.2f,"             \
-    "\"memory_usage\":%.2f,"          \
-    "\"network_sent\":%lu,"           \
-    "\"network_received\":%lu"        \
-    "}}}"
-
-/* Shadow 命令重設 JSON 模板 */
-#define SHADOW_RESET_COMMAND_JSON_TEMPLATE \
-    "{"                                    \
-    "\"state\":{"                          \
-    "\"desired\":{"                        \
-    "\"%s\":null"                          \
-    "},"                                   \
-    "\"reported\":{"                       \
-    "\"%s\":0"                             \
-    "}}}"
-
-/* Shadow 命令結果回報 JSON 模板 */
-#define SHADOW_COMMAND_RESULT_JSON_TEMPLATE \
-    "{"                                     \
-    "\"state\":{"                           \
-    "\"reported\":{"                        \
-    "\"%s_result\":%d,"                     \
-    "\"%s_timestamp\":%u"                   \
-    "}}}"
-
-/* 指數退避計算 */
-#define CALCULATE_BACKOFF_DELAY(retry_count) \
-    MIN(RETRY_BACKOFF_BASE_SECONDS * (1 << (retry_count)), RETRY_BACKOFF_MAX_SECONDS)
-
-/* 新的基於 MAC seed 的退避計算宏 */
-#define CALCULATE_BACKOFF_DELAY_WITH_MAC_SEED(retry_count, reconnect_state) \
-    calculateBackoffDelayWithSeed(retry_count, (reconnect_state)->macAddressSeed)
-
-
-/* 設備資訊相關宏定義 */
-#define MAX_DEVICE_MODEL_LENGTH           64
-#define MAX_DEVICE_SERIAL_LENGTH          64
-#define MAX_MAC_ADDRESS_LENGTH            32
-#define MAX_PANEL_LENGTH                  16
-#define MAX_BRAND_LENGTH                  32
-#define MAX_COUNTRY_CODE_LENGTH           8
-#define MAX_FIRMWARE_VERSION_LENGTH       32
-#define MAX_ARCHITECTURE_LENGTH           256
-
-/* Client ID 格式檢查宏 */
-#define DMS_CLIENT_ID_PREFIX              "benq-dms-test-"
-#define DMS_CLIENT_ID_PREFIX_LENGTH       14
-#define DMS_MAC_SUFFIX_LENGTH             12
-
-/* BDID 計算相關宏 */
-#define MAX_BDID_LENGTH                   128
-#define MAX_SOURCE_DATA_LENGTH            128
-
-/* UCI 配置路徑 */
-#define UCI_DMS_PACKAGE                   "dms-client"
-#define UCI_DEVICE_SECTION                "hardware"
-#define UCI_DEVICE_MODEL                  "model"
-#define UCI_DEVICE_SERIAL                 "serial"
-#define UCI_DEVICE_TYPE                   "device_type"
-#define UCI_DEVICE_SUBTYPE                "device_subtype"
-#define UCI_DEVICE_PANEL                  "panel"
-#define UCI_DEVICE_BRAND                  "brand"
-#define UCI_DEVICE_COUNTRY                "country_code"
-
-/* 系統檔案路徑 (OpenWrt 常見位置) */
-#define SYSTEM_MODEL_FILE                 "/proc/device-tree/model"
-#define SYSTEM_SERIAL_FILE                "/proc/device-tree/serial-number"
-#define SYSTEM_CPUINFO_FILE               "/proc/cpuinfo"
-
-
-/* 設備硬體資訊 (預設值 - 可透過 UCI 或系統檔案覆蓋) */
-#define DEFAULT_DEVICE_MODEL              "WDC25"
-#define DEFAULT_DEVICE_SERIAL             "S090Y00000002"
-#define DEFAULT_DEVICE_PANEL              "WW"
-#define DEFAULT_DEVICE_BRAND              "BenQ"
-#define DEFAULT_COUNTRY_CODE              "tw"
-
-
 
 
 #endif /* ifndef DEMO_CONFIG_H_ */
