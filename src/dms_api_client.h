@@ -37,9 +37,6 @@
 #define DMS_API_MAX_URL_SIZE          1024
 #define DMS_API_MAX_PAYLOAD_SIZE      4096
 
-#define DMS_HTTP_RETRY_MAX_ATTEMPTS    2      // 最大重試次數
-#define DMS_HTTP_RETRY_DELAY_MS        100    // 重試間隔 (毫秒)
-
 /*-----------------------------------------------------------*/
 
 /**
