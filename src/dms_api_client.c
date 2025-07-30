@@ -324,6 +324,21 @@ DMSAPIResult_t dms_http_request(DMSHTTPMethod_t method,
         printf("📤 [DMS-API] Payload: %s\n", payload);
     }
 
+    printf("🔐 [DMS-API] === DIAGNOSTIC: Complete Headers List ===\n");
+    printf("🔐 [DMS-API] Generated signature: %s\n", signature);
+    printf("🔐 [DMS-API] Product key: %s\n", DMS_API_PRODUCT_KEY);
+    printf("🔐 [DMS-API] Timestamp: %s\n", timestamp_str);
+
+    /* 列出所有 headers */
+    struct curl_slist* current = headers;
+    int header_count = 1;
+    while (current) {
+    	printf("🔐 [DMS-API] Header %d: %s\n", header_count++, current->data);
+    	current = current->next;
+    }
+    printf("🔐 [DMS-API] === END DIAGNOSTIC ===\n");
+    
+
     /* 執行請求 */
     res = curl_easy_perform(curl);
 

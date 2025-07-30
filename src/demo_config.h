@@ -286,7 +286,8 @@ typedef enum {
     DMS_DEVICE_TYPE_IFP = 1,               // Interactive Flat Panel  
     DMS_DEVICE_TYPE_SIGNAGE = 2,           // Signage
     DMS_DEVICE_TYPE_PROJECTOR = 3,         // Projector (當前設備類型)
-    DMS_DEVICE_TYPE_OPS = 4                // Open Pluggable Specification
+    DMS_DEVICE_TYPE_OPS = 4,               // Open Pluggable Specification
+    DMS_DEVICE_TYPE_LINUX = 5              // Linux (新增：支援 Linux 設備類型)	    
 } DMSDeviceType_t;
 
 /* DMS 設備子類型定義 (根據 DMS Server 規範) */

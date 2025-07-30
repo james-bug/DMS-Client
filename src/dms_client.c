@@ -655,7 +655,7 @@ static int getDeviceHardwareInfo(DeviceHardwareInfo_t* hwInfo)
     }
     
     /* 設定設備類型 (當前設備) */
-    hwInfo->deviceType = DMS_DEVICE_TYPE_PROJECTOR;
+    hwInfo->deviceType = DMS_DEVICE_TYPE_LINUX; 
     hwInfo->deviceSubType = DMS_DEVICE_SUBTYPE_EMBEDDED;
     
     /* 設定資訊來源 */
@@ -672,7 +672,7 @@ static int getDeviceHardwareInfo(DeviceHardwareInfo_t* hwInfo)
     printf("   Model: %s\n", hwInfo->modelName);
     printf("   Serial: %s\n", hwInfo->serialNumber);
     printf("   MAC: %s\n", hwInfo->macAddress);
-    printf("   Type: %d (Projector), SubType: %d (Embedded)\n", 
+    printf("   Type: %d (Linux), SubType: %d (Embedded)\n", 
            hwInfo->deviceType, hwInfo->deviceSubType);
     printf("   Brand: %s, Panel: %s\n", hwInfo->brand, hwInfo->panel);
     printf("   Country: %s, FW: %s\n", hwInfo->countryCode, hwInfo->firmwareVersion);
@@ -857,7 +857,7 @@ static int showDeviceStatus(void)
     printf("   MAC: %s\n", g_deviceHardwareInfo.macAddress);
     printf("   Type: %d (%s), SubType: %d (%s)\n", 
            g_deviceHardwareInfo.deviceType,
-           (g_deviceHardwareInfo.deviceType == DMS_DEVICE_TYPE_PROJECTOR) ? "Projector" : "Other",
+           (g_deviceHardwareInfo.deviceType == DMS_DEVICE_TYPE_LINUX) ? "Linux" : "Other",
            g_deviceHardwareInfo.deviceSubType,
            (g_deviceHardwareInfo.deviceSubType == DMS_DEVICE_SUBTYPE_EMBEDDED) ? "Embedded" : "Other");
     printf("   Brand: %s, Panel: %s\n", 

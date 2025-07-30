@@ -120,7 +120,7 @@ typedef struct {
     char panel[16];               // 面板區域 (WW/CN/etc)
     char brand[32];               // 品牌名稱
     char version[32];             // DMS Client 版本
-    char type[8];                 // 設備類型字串 (0-4)
+    char type[8];                 // 設備類型�(0-5)
     int subType;                  // 設備子類型 (1-4)
     char countryCode[8];          // 國家代碼
     char architecture[256];       // 系統架構資訊
@@ -367,7 +367,7 @@ DMSAPIResult_t dms_api_device_register(const DMSDeviceRegisterRequest_t* request
 /**
  * @brief 取得設備 PIN 碼
  * @param[in] uniqueId 設備唯一 ID
- * @param[in] deviceType 設備類型字串 (0-4)
+ * @param[in] deviceType 設備類型字串5)
  * @param[out] response PIN 碼回應結構
  * @return 成功返回 DMS_API_SUCCESS，失敗返回錯誤碼
  */
