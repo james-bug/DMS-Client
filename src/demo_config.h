@@ -479,10 +479,5 @@ typedef enum {
 
 
 
-/* 新的退避計算函數宣告 */
-uint32_t calculateBackoffDelayWithSeed(uint32_t retryCount, const char* macSeed);
-void initializeMacAddressSeed(ReconnectState_t* reconnectState);
-uint32_t calculateSeedFromMac(const char* macAddress);
-
 
 #endif /* ifndef DEMO_CONFIG_H_ */
