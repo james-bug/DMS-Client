@@ -2695,6 +2695,26 @@ int main(int argc, char **argv)
 #endif
             return EXIT_SUCCESS;
         }
+
+	 /* ✅ 新增：--log-level 參數處理 */
+        else if (strcmp(argv[i], "--log-level") == 0) {
+            if (i + 1 < argc) {
+                DmsLogLevel_t level = dms_log_parse_level(argv[i + 1]);
+                dms_log_set_level(level);
+                printf("✅ Log level set to: %s\n", dms_log_level_string(level));
+                i++; // 跳過參數值
+            } else {
+                printf("❌ Error: --log-level requires a level argument (ERROR/WARN/INFO/DEBUG)\n");
+                printf("Usage: %s --log-level <level>\n", argv[0]);
+                return EXIT_FAILURE;
+            }
+        }
+        /* ✅ 新增：--debug 參數處理（作為 --log-level DEBUG 的快捷方式）*/
+        else if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-d") == 0) {
+            dms_log_set_level(DMS_LOG_LEVEL_DEBUG);
+            printf("✅ Debug logging enabled\n");
+        }
+
         /* 其他參數處理保持原有邏輯... */
     }
 
