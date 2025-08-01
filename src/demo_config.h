@@ -279,7 +279,6 @@ typedef enum {
     DMS_ERROR_REGISTRATION_FAILED,         // 設備註冊失敗
     DMS_ERROR_PINCODE_FAILED,              // PIN 碼獲取失敗
     DMS_ERROR_BDID_CALCULATION,            // BDID 計算失敗
-    DMS_ERROR_DEVICE_NOT_BOUND,            // 設備未綁定到 DMS Server
     DMS_ERROR_UNKNOWN
 } DMSErrorCode_t;
 
