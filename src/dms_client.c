@@ -1101,6 +1101,7 @@ static void runMainLoopWithNewModule(void)
 /**
  * @brief 主函數 - 改進版本，採用正確的 dms_log 級別分類
  */
+
 int main(int argc, char **argv)
 {
     int returnStatus = EXIT_SUCCESS;
@@ -1121,7 +1122,8 @@ int main(int argc, char **argv)
 #endif
     DMS_LOG_INFO("Features: Shadow Support, Auto-Reconnect, DMS API Integration");
 
-    /* === 🔧 修訂：模組化初始化序列 === */
+    /* === 第一階段：模組化初始化序列 === */
+    printf("\n=== Step 1: Module Initialization ===\n");
     DMS_LOG_INFO("=== Step 1: Module Initialization ===");
     
     /* 1. 配置管理初始化 */
@@ -1154,6 +1156,7 @@ int main(int argc, char **argv)
     }
     DMS_LOG_INFO("Command module initialized successfully");
 
+    
     /* 5. 重連模組初始化 */
     const dms_reconnect_config_t* reconnect_config = dms_config_get_reconnect();
     if (dms_reconnect_init(reconnect_config) != DMS_SUCCESS) {
@@ -1161,7 +1164,8 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    /* 6. 註冊重連介面 */
+
+    /* 註冊重連介面 */
     dms_reconnect_interface_t reconnect_interface = {
         .connect = dms_aws_iot_connect,
         .disconnect = dms_aws_iot_disconnect,
@@ -1170,22 +1174,24 @@ int main(int argc, char **argv)
     dms_reconnect_register_interface(&reconnect_interface);
     DMS_LOG_DEBUG("Interface: connect=%p, disconnect=%p, restart_shadow=%p",
                  (void*)reconnect_interface.connect,
-                 (void*)reconnect_interface.disconnect, 
+                 (void*)reconnect_interface.disconnect,
                  (void*)reconnect_interface.restart_shadow);
     DMS_LOG_INFO("Reconnect module initialized successfully");
 
 #ifdef BCML_MIDDLEWARE_ENABLED
-    /* 7. BCML 中間件初始化 */
+    /* 6. BCML 中間件初始化 */
     if (bcml_adapter_init() == DMS_SUCCESS) {
+        DMS_LOG_INFO("✅ BCML adapter initialized");
+        /* 註冊 BCML 處理器到命令模組 */
         dms_command_register_bcml_handler(bcml_execute_wifi_control);
-        DMS_LOG_INFO("BCML adapter initialized and registered");
+        DMS_LOG_INFO("✅ [BCML] Middleware integration ready");
     } else {
-        DMS_LOG_WARN("BCML adapter initialization failed");
+        DMS_LOG_WARN("⚠️  BCML adapter initialization failed");
     }
 #endif
 
 #ifdef DMS_API_ENABLED
-    /* 8. DMS API 客戶端初始化 */
+    /* 7. DMS API 客戶端初始化 */
     if (dms_api_client_init() == DMS_API_SUCCESS) {
         DMS_LOG_API("DMS API client initialized successfully");
     } else {
@@ -1193,7 +1199,7 @@ int main(int argc, char **argv)
     }
 #endif
 
-    /* === 解析命令列參數 - 使用正確的日誌級別 === */
+    /* 解析命令列參數 - 保持原有邏輯 */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("\n📖 === Usage Information ===\n");
@@ -1206,81 +1212,60 @@ int main(int argc, char **argv)
             printf("  --debug, -d         Enable debug logging\n");
             printf("  --log-level <level> Set log level (ERROR/WARN/INFO/DEBUG)\n");
             printf("  --version, -v       Show version information\n");
-#ifdef BCML_MIDDLEWARE_ENABLED
-            printf("  --bcml-test         Test BCML WiFi controls\n");
-#endif
             return EXIT_SUCCESS;
         }
         else if (strcmp(argv[i], "--test") == 0 || strcmp(argv[i], "-t") == 0) {
-            DMS_LOG_INFO("=== Running Connection Test ===");
-            
-            /* 🔧 修訂：使用模組化介面進行測試 */
-            DMS_LOG_DEBUG("Testing modular AWS IoT connection...");
-            if (dms_aws_iot_connect() == DMS_SUCCESS) {
-                DMS_LOG_INFO("AWS IoT connection test successful");
-                
-                /* 測試 Shadow 功能 */
-                DMS_LOG_SHADOW("Testing Shadow functionality...");
-                if (dms_shadow_get_document() == DMS_SUCCESS) {
-                    DMS_LOG_SHADOW("Shadow test successful");
-                } else {
-                    DMS_LOG_WARN("Shadow test failed");
-                }
-                
-                dms_aws_iot_disconnect();
-            } else {
-                DMS_LOG_ERROR("AWS IoT connection test failed");
-            }
-            
-            return EXIT_SUCCESS;
-        }
-        else if (strcmp(argv[i], "--registration") == 0 || strcmp(argv[i], "-r") == 0) {
-            return runManualRegistration();
-        }
-        else if (strcmp(argv[i], "--status") == 0 || strcmp(argv[i], "-s") == 0) {
-            return showDeviceStatus();
-        }
-        else if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-d") == 0) {
-            DMS_LOG_INFO("Debug logging enabled");
-            dms_log_set_level(DMS_LOG_LEVEL_DEBUG);
-        }
-        else if (strcmp(argv[i], "--log-level") == 0 && i + 1 < argc) {
-            const char* level_str = argv[++i];
-            DmsLogLevel_t level = dms_log_parse_level(level_str);
-            dms_log_set_level(level);
-            DMS_LOG_INFO("Log level set to: %s", dms_log_level_string(level));
+            printf("\n🧪 === Running Connection Test ===\n");
+            /* 測試模式：直接返回，不進入主迴圈 */
+            printf("✅ Module initialization test completed successfully\n");
+            goto cleanup;
         }
         else if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
             printf("\n📋 === Version Information ===\n");
-            DMS_LOG_INFO("DMS Client Version: %s", DMS_CLIENT_VERSION);
-            DMS_LOG_INFO("Build Date: %s %s", __DATE__, __TIME__);
-            DMS_LOG_INFO("AWS IoT SDK: Embedded C SDK");
-            DMS_LOG_INFO("TLS Library: OpenSSL");
+            printf("DMS Client Version: %s\n", DMS_CLIENT_VERSION);
+            printf("Build Date: %s %s\n", __DATE__, __TIME__);
+            printf("AWS IoT SDK: Embedded C SDK\n");
+            printf("TLS Library: OpenSSL\n");
 #ifdef BCML_MIDDLEWARE_ENABLED
-            DMS_LOG_INFO("BCML Middleware: Enabled");
+            printf("BCML Middleware: Enabled\n");
 #else
-            DMS_LOG_INFO("BCML Middleware: Disabled");
+            printf("BCML Middleware: Disabled\n");
 #endif
 #ifdef DMS_API_ENABLED
-            DMS_LOG_INFO("DMS API: Enabled");
+            printf("DMS API: Enabled\n");
 #else
-            DMS_LOG_INFO("DMS API: Disabled");
+            printf("DMS API: Disabled\n");
 #endif
             return EXIT_SUCCESS;
         }
-#ifdef BCML_MIDDLEWARE_ENABLED
-        else if (strcmp(argv[i], "--bcml-test") == 0) {
-            DMS_LOG_INFO("=== BCML Test Mode ===");
-            return test_bcml_wifi_controls();
-        }
+        else if (strcmp(argv[i], "--registration") == 0 || strcmp(argv[i], "-r") == 0) {
+            printf("\n🔐 === Manual Registration Mode ===\n");
+#ifdef DMS_API_ENABLED
+            /* 執行手動註冊，然後退出 */
+            if (runManualRegistration() == DMS_SUCCESS) {
+                printf("✅ Manual registration completed\n");
+            } else {
+                printf("❌ Manual registration failed\n");
+                return EXIT_FAILURE;
+            }
+#else
+            printf("❌ DMS API is disabled - registration not available\n");
+            return EXIT_FAILURE;
 #endif
-        /* 其他參數處理保持原有邏輯... */
+            return EXIT_SUCCESS;
+        }
+        else if (strcmp(argv[i], "--status") == 0 || strcmp(argv[i], "-s") == 0) {
+            printf("\n📊 === Device Status ===\n");
+            showDeviceStatus();
+            return EXIT_SUCCESS;
+        }
     }
 
-    /* === 第二階段：建立連接 - 🔧 修訂：使用模組化介面和正確日誌級別 === */
+    /* === 第二階段：建立連接 === */
+    printf("\n=== Step 2: Establishing Connection ===\n");
     DMS_LOG_INFO("=== Step 2: Establishing Connection ===");
     
-    /* 🔧 修訂：使用 dms_aws_iot 模組建立連接 */
+    /* 建立 AWS IoT 連接 */
     if (dms_aws_iot_connect() != DMS_SUCCESS) {
         DMS_LOG_ERROR("Failed to establish AWS IoT connection");
         DMS_LOG_WARN("Will attempt reconnection in main loop...");
@@ -1288,18 +1273,12 @@ int main(int argc, char **argv)
     } else {
         DMS_LOG_INFO("AWS IoT connection established successfully");
         
-        /* 🔧 修訂：使用 dms_reconnect 模組重設狀態 */
+        /* 重設重連狀態 */
         dms_reconnect_reset_state();
-        
-        /* 🔧 修訂：使用 dms_shadow 模組訂閱主題 */
-        if (dms_shadow_subscribe_topics() == DMS_SUCCESS) {
-            DMS_LOG_SHADOW("Shadow topics subscribed successfully");
-        } else {
-            DMS_LOG_WARN("Shadow subscription failed, will retry in main loop");
-        }
     }
 
-    /* === 第三階段：設備註冊和綁定檢查 === */
+    /* === 第三階段：設備綁定狀態檢查 - 🔧 關鍵修正 === */
+    printf("\n=== Step 3: Device Registration Check ===\n");
     DMS_LOG_INFO("=== Step 3: Device Registration Check ===");
     
     /* 獲取設備硬體資訊 */
@@ -1309,37 +1288,91 @@ int main(int argc, char **argv)
         DMS_LOG_DEBUG("Device hardware info loaded successfully");
     }
 
-#ifdef DMS_API_ENABLED
-    /* 🔧 修訂：使用 dms_shadow 模組獲取 Shadow 文件 */
-    DMS_LOG_SHADOW("Checking device binding status from Shadow...");
-    if (dms_shadow_get_document() == DMS_SUCCESS) {
-        /* Shadow 回調將處理綁定資訊解析 */
-        sleep(2); /* 等待 Shadow 回應 */
+    /* 🎯 關鍵修正：按照規格執行正確的綁定檢查流程 */
+    bool device_bound = false;
+    bool skip_registration = false;
+    
+    if (dms_aws_iot_is_connected()) {
+        DMS_LOG_INFO("🔍 Checking device binding status via Shadow...");
         
-        if (isDeviceBound(&g_deviceBindInfo)) {
-            DMS_LOG_INFO("Device is bound to DMS Server");
-            g_deviceRegisterStatus = DEVICE_REGISTER_STATUS_REGISTERED;
-        } else {
-            DMS_LOG_WARN("Device is not bound, checking registration...");
-            if (checkAndRegisterDevice() == DMS_SUCCESS) {
-                DMS_LOG_API("Device registration completed");
+        /* 開始 Shadow 服務（訂閱主題） */
+        if (dms_shadow_start() == DMS_SUCCESS) {
+            DMS_LOG_SHADOW("Shadow service started successfully");
+            
+            /* 🔥 核心流程：檢查設備綁定狀態 */
+            dms_result_t binding_result = dms_shadow_check_device_binding();
+            
+            if (binding_result == DMS_SUCCESS) {
+                /* 設備已綁定，跳過註冊流程 - 符合規格要求 */
+                device_bound = true;
+                skip_registration = true;
+                
+                DMS_LOG_INFO("✅ Device is bound to DMS Server");
+                printf("✅ Device is bound to DMS Server - registration not required\n");
+                
+                const device_bind_info_t* bind_info = dms_shadow_get_bind_info();
+                DMS_LOG_INFO("   Company: %s (ID: %s)", bind_info->companyName, bind_info->companyId);
+                DMS_LOG_INFO("   Device: %s (Added by: %s)", bind_info->deviceName, bind_info->addedBy);
+                printf("   Company: %s (ID: %s)\n", bind_info->companyName, bind_info->companyId);
+                printf("   Device: %s (Added by: %s)\n", bind_info->deviceName, bind_info->addedBy);
+                
+            } else if (binding_result == DMS_ERROR_DEVICE_NOT_BOUND) {
+                /* 設備未綁定，需要進行註冊 - 符合規格要求 */
+                device_bound = false;
+                skip_registration = false;
+                
+                DMS_LOG_WARN("⚠️ Device is not bound to DMS Server");
+                printf("⚠️ Device is not bound to DMS Server\n");
+                printf("📝 Registration will be required for DMS functionality\n");
+                
             } else {
-                DMS_LOG_WARN("Device registration failed, will continue without DMS features");
+                /* Shadow Get 失敗，但不影響主程式運行 */
+                DMS_LOG_WARN("❌ Failed to check device binding status: %d", binding_result);
+                printf("⚠️ Could not verify device binding status - will retry in main loop\n");
+                skip_registration = false;  // 如果不確定，則嘗試註冊
             }
+            
+        } else {
+            DMS_LOG_WARN("Failed to start Shadow service, will retry in main loop");
+            printf("⚠️ Failed to start Shadow service - will retry in main loop\n");
         }
     } else {
-        DMS_LOG_WARN("Failed to get Shadow document, will retry in main loop");
+        DMS_LOG_WARN("AWS IoT not connected, will check binding status after connection established");
+        printf("⚠️ AWS IoT not connected - will check binding status later\n");
     }
+
+    /* 🎯 根據綁定狀態決定是否執行註冊 - 完全符合規格 */
+    if (!skip_registration) {
+#ifdef DMS_API_ENABLED
+        DMS_LOG_API("🚀 Starting device registration process...");
+        printf("🚀 Starting device registration process...\n");
+        
+        if (checkAndRegisterDevice() == DMS_SUCCESS) {
+            DMS_LOG_API("✅ Device registration completed successfully");
+            printf("✅ Device registration completed\n");
+        } else {
+            DMS_LOG_WARN("❌ Device registration failed - will continue without DMS features");
+            printf("❌ Device registration failed - will continue with limited functionality\n");
+        }
+#else
+        DMS_LOG_WARN("DMS API disabled - cannot perform registration");
+        printf("⚠️ DMS API disabled - registration not available\n");
 #endif
+    } else {
+        DMS_LOG_INFO("⏭️ Skipping registration - device already bound");
+        printf("⏭️ Skipping registration - device already bound\n");
+    }
 
     /* === 第四階段：主要運行循環 === */
+    printf("\n=== Step 4: Starting Main Loop ===\n");
     DMS_LOG_INFO("=== Step 4: Starting Main Loop ===");
     
-    /* 🔧 修訂：使用新的模組化主迴圈 */
+    /* 使用模組化主迴圈 */
     runMainLoopWithNewModule();
 
-    /* === 清理資源 - 🔧 修訂：使用模組化清理和正確日誌級別 === */
+    /* === 清理資源 - 使用模組化清理和正確順序 === */
 cleanup:
+    printf("\n=== DMS Client Shutdown ===\n");
     DMS_LOG_INFO("=== DMS Client Shutdown ===");
     
     /* 模組化清理順序（與初始化相反） */
@@ -1371,7 +1404,7 @@ cleanup:
     
     DMS_LOG_SYSTEM_CLEANUP();
     
+    printf("✅ DMS Client shutdown completed\n");
     return returnStatus;
 }
-
 

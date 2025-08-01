@@ -737,3 +737,45 @@ static uint32_t get_system_uptime(void)
     return 0;
 }
 
+/**
+ * @brief 綁定檢查函數組合 - 按照規格要求的正確流程
+ * 
+ * 這個函數封裝了完整的設備綁定檢查流程：
+ * 1. 獲取 Shadow 文檔
+ * 2. 等待回應
+ * 3. 解析綁定資訊
+ * 4. 返回綁定狀態
+ */
+dms_result_t dms_shadow_check_device_binding(void)
+{
+    DMS_LOG_INFO("🔍 Checking device binding status via Shadow...");
+    
+    /* 步驟1：請求 Shadow 文檔 */
+    dms_result_t result = dms_shadow_get_document();
+    if (result != DMS_SUCCESS) {
+        DMS_LOG_ERROR("❌ Failed to request Shadow document");
+        return result;
+    }
+    
+    /* 步驟2：等待 Shadow Get 回應 */
+    DMS_LOG_DEBUG("⏳ Waiting for Shadow Get response...");
+    result = dms_shadow_wait_get_response(SHADOW_GET_TIMEOUT_MS);
+    if (result != DMS_SUCCESS) {
+        DMS_LOG_WARN("❌ Failed to get Shadow response: %d", result);
+        return result;
+    }
+    
+    /* 步驟3：檢查綁定狀態（已在 shadow_message_handler 中解析） */
+    if (dms_shadow_is_device_bound()) {
+        DMS_LOG_INFO("✅ Device is bound to DMS Server");
+        const device_bind_info_t* bind_info = dms_shadow_get_bind_info();
+        DMS_LOG_INFO("   Company: %s (ID: %s)", bind_info->companyName, bind_info->companyId);
+        DMS_LOG_INFO("   Device: %s (Added by: %s)", bind_info->deviceName, bind_info->addedBy);
+        return DMS_SUCCESS;
+    } else {
+        DMS_LOG_WARN("⚠️ Device is not bound to DMS Server");
+        DMS_LOG_INFO("   Registration will be required for DMS functionality");
+        return DMS_ERROR_DEVICE_NOT_BOUND;  // 新的錯誤碼，表示未綁定
+    }
+}
+
