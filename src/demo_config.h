@@ -68,14 +68,14 @@
 
 /* 重連配置 */
 #define MAX_RETRY_ATTEMPTS                ( 10 )
-#define RETRY_BACKOFF_BASE_SECONDS        ( 3 )
-#define RETRY_BACKOFF_MAX_SECONDS         ( 1800 )
+#define RETRY_BACKOFF_BASE_SECONDS        ( 2 )
+#define RETRY_BACKOFF_MAX_SECONDS         ( 5400 )
 #define CONNECTION_RETRY_DELAY_MS         ( 1000 )
 
 
 /* 新增：基於 MAC 地址的隨機退避配置 */
-#define MAC_SEED_MULTIPLIER                ( 5 )    /* MAC seed 權重 */
-#define MAC_SEED_MAX_OFFSET                ( 600 )   /* 最大隨機偏移（秒）*/
+#define MAC_SEED_MULTIPLIER                ( 3 )    /* MAC seed 權重 */
+#define MAC_SEED_MAX_OFFSET                ( 1200 )   /* 最大隨機偏移（秒）*/
 
 
 /* AWS IoT SDK 版本 */

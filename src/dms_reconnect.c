@@ -298,6 +298,120 @@ void dms_reconnect_cleanup(void)
 /* 內部函數實作 - ✅ 完全對應原始函數 */
 
 /**
+ * @brief 根據設備MAC地址計算時間段偏移
+ */
+
+
+static uint32_t calculate_time_slot_offset(const char* mac_seed)
+{
+    if (!mac_seed || strlen(mac_seed) == 0) {
+        return 0;
+    }
+    
+    // 12個質數間隔序列 (每段約4.5分鐘，總共90分鐘)
+    const uint32_t prime_intervals[] = {
+        271, 277, 281, 283, 293, 307, 311, 313, 317, 331, 337, 347
+    };
+    
+    uint32_t mac_hash = calculate_seed_from_mac(mac_seed);
+    uint32_t time_slot = mac_hash % 12;  // 0-11 共12個時間段
+    
+    // 計算累積偏移
+    uint32_t cumulative_offset = 0;
+    for (uint32_t i = 0; i < time_slot; i++) {
+        cumulative_offset += prime_intervals[i];
+    }
+    
+    return cumulative_offset;
+}
+
+
+/**
+ * @brief MAC段位多維度雜湊 - 分別處理MAC的不同部分
+ */
+static uint32_t calculate_mac_segment_hash(const char* mac_address)
+{
+    if (!mac_address || strlen(mac_address) == 0) {
+        return 1;
+    }
+    
+    size_t mac_len = strlen(mac_address);
+    if (mac_len < 6) {
+        // MAC太短，使用原始方法
+        return calculate_seed_from_mac(mac_address);
+    }
+    
+    // 分段處理MAC地址
+    // 前4位：製造商標識影響
+    uint32_t prefix_hash = 5381;
+    for (int i = 0; i < 4 && i < mac_len; i++) {
+        prefix_hash = ((prefix_hash << 5) + prefix_hash) + mac_address[i];
+    }
+    
+    // 中間4位：批次/型號影響  
+    uint32_t middle_hash = 7919;  // 不同的初始值
+    int middle_start = mac_len >= 8 ? 4 : mac_len / 2;
+    int middle_end = mac_len >= 8 ? 8 : (mac_len * 3) / 4;
+    for (int i = middle_start; i < middle_end && i < mac_len; i++) {
+        middle_hash = ((middle_hash << 3) + middle_hash) + mac_address[i];
+    }
+    
+    // 後4位：設備個體影響
+    uint32_t suffix_hash = 65537;  // 又一個不同初始值
+    int suffix_start = mac_len >= 8 ? mac_len - 4 : (mac_len * 3) / 4;
+    for (int i = suffix_start; i < mac_len; i++) {
+        suffix_hash = ((suffix_hash << 7) + suffix_hash) + mac_address[i];
+    }
+    
+    // 三段雜湊的非線性組合
+    uint32_t combined = prefix_hash ^ (middle_hash << 11) ^ (suffix_hash >> 5);
+    combined += (prefix_hash * middle_hash) ^ (suffix_hash * 0x9E3779B9);
+    
+    return combined > 0 ? combined : 1;
+}
+
+
+/**
+ * @brief 級聯式Jitter - MAC + 時間 + 重試 三層隨機性疊加
+ */
+static uint32_t add_cascading_jitter(uint32_t base_delay, uint32_t retry_count, const char* mac_seed)
+{
+    // 第一層：MAC基礎Jitter (基於MAC雜湊)
+    uint32_t mac_hash = calculate_mac_segment_hash(mac_seed);
+    uint32_t mac_jitter = (mac_hash % 20) + 1;  // 1-20秒
+    
+    // 第二層：時間戳Jitter (基於當前時間)
+    time_t current_time = time(NULL);
+    uint32_t time_jitter = ((uint32_t)current_time % 25) + 5;  // 5-29秒
+    
+    // 第三層：重試自適應Jitter (基於重試次數)
+    uint32_t retry_jitter_base = 15 + (retry_count * 10);  // 基礎15秒 + 每次重試10秒
+    uint32_t retry_jitter = ((uint32_t)current_time % retry_jitter_base) + 1;
+    
+    // 第四層：微秒精度Jitter (基於系統微秒時間)
+    struct timespec ts;
+    uint32_t micro_jitter = 0;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        micro_jitter = (ts.tv_nsec / 1000000) % 15;  // 0-14秒微調
+    }
+    
+    // 級聯組合：非線性疊加避免簡單相加
+    uint32_t cascading_jitter = mac_jitter + time_jitter + retry_jitter + micro_jitter;
+    
+    // 加入交互項增強隨機性
+    cascading_jitter += (mac_jitter * time_jitter) % 10;  // 交互增強
+    cascading_jitter += (retry_count * mac_jitter) % 8;   // 重試-MAC交互
+    
+    // 確保總Jitter在合理範圍內 (最大約100秒)
+    if (cascading_jitter > 100) {
+        cascading_jitter = 50 + (cascading_jitter % 50);
+    }
+    
+    return base_delay + cascading_jitter;
+}
+
+
+/**
  * @brief 計算帶 MAC 種子的指數退避延遲 - ✅ 對應原始 calculateBackoffDelayWithSeed()
  */
 static uint32_t calculate_backoff_delay_with_seed(uint32_t retry_count, const char* mac_seed)
@@ -310,33 +424,80 @@ static uint32_t calculate_backoff_delay_with_seed(uint32_t retry_count, const ch
     uint32_t random_offset = (seed % MAC_SEED_MAX_OFFSET) * MAC_SEED_MULTIPLIER;
 
     /* 計算最終延遲時間，確保不超過最大值 - ✅ 與原始邏輯相同 */
-    uint32_t final_delay = base_delay + random_offset;
+
+
+     /* 計算初步延遲時間 */
+    uint32_t preliminary_delay = base_delay + random_offset;
+    
+    /* 加入時間段分散 */
+    uint32_t time_slot_offset = calculate_time_slot_offset(mac_seed);
+    uint32_t slot_dispersed_delay = preliminary_delay + time_slot_offset;
+    
+
+    /* 加入級聯式Jitter增強隨機性 */
+    uint32_t jittered_delay = add_cascading_jitter(slot_dispersed_delay, retry_count, mac_seed);
+
+
+    /* 確保不超過最大值 */
+    uint32_t final_delay = jittered_delay;
     if (final_delay > g_reconnect_ctx.max_delay_seconds) {
         final_delay = g_reconnect_ctx.max_delay_seconds;
     }
 
-    DMS_LOG_DEBUG("Backoff calculation: retry=%u, base=%u, offset=%u, final=%u",
-                  retry_count, base_delay, random_offset, final_delay);
+
+    DMS_LOG_DEBUG("Backoff calculation: retry=%u, base=%u, mac_offset=%u, slot_offset=%u, jitter=+%u, final=%u",
+                  retry_count, base_delay, random_offset, time_slot_offset, 
+                  jittered_delay - slot_dispersed_delay, final_delay);
 
     return final_delay;
 }
 
+
+
 /**
- * @brief 從 MAC 地址計算種子值 - ✅ 對應原始 calculateSeedFromMac()
+ * @brief 整合MAC段位雜湊 + 時間種子輪轉 (多維度動態隨機性)
  */
 static uint32_t calculate_seed_from_mac(const char* mac_address)
 {
     if (!mac_address || strlen(mac_address) == 0) {
-        return 1; // 預設種子值
+        return 1;
     }
 
-    uint32_t seed = 0;
-    for (int i = 0; mac_address[i] != '\0'; i++) {
-        seed += (uint32_t)mac_address[i];
+    // 獲取當前時間進行種子輪轉
+    time_t current_time = time(NULL);
+    uint32_t hour_rotation = (uint32_t)(current_time / 3600) % 24;
+    
+    // 時間輪轉種子表
+    const uint32_t time_seeds[] = {
+        0x9E3779B9, 0xC6EF3720, 0x5BD1E995, 0x85EBCA6B,
+        0xD2B54394, 0xFEEDBEEF, 0xCAFEBABE, 0xDEADBEEF,
+        0x12345678, 0x87654321, 0xABCDEF01, 0x13579BDF,
+        0x2468ACE0, 0x97531BDF, 0x1A2B3C4D, 0x5E6F7A8B,
+        0x9C0D1E2F, 0x3A4B5C6D, 0x7E8F9A0B, 0x1C2D3E4F,
+        0x5A6B7C8D, 0x9E0F1A2B, 0x3C4D5E6F, 0x7A8B9C0D
+    };
+    
+    uint32_t dynamic_salt = time_seeds[hour_rotation];
+    
+    // 使用MAC段位多維度雜湊 (新增)
+    uint32_t mac_segment_hash = calculate_mac_segment_hash(mac_address);
+    
+    // 傳統DJB2雜湊
+    uint32_t djb2_hash = 5381;
+    int c;
+    const char* ptr = mac_address;
+    while ((c = *ptr++)) {
+        djb2_hash = ((djb2_hash << 5) + djb2_hash) + c;
     }
-
-    return seed > 0 ? seed : 1; // 確保種子不為 0
+    
+    // 多層雜湊組合：MAC段位 + DJB2 + 時間種子
+    uint32_t combined_hash = mac_segment_hash ^ djb2_hash ^ dynamic_salt;
+    combined_hash += (mac_segment_hash * djb2_hash) ^ (dynamic_salt >> 8);
+    combined_hash ^= (hour_rotation * 0x01010101);
+    
+    return combined_hash > 0 ? combined_hash : 1;
 }
+
 
 /**
  * @brief 初始化 MAC 地址種子 - ✅ 對應原始 initializeMacAddressSeed()
