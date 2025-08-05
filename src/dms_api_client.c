@@ -25,7 +25,7 @@
 
 /* 全域變數 */
 static bool g_curl_initialized = false;
-static char g_base_url[DMS_API_MAX_URL_SIZE] = DMS_API_BASE_URL_TEST;
+static char g_base_url[DMS_API_BASE_URL_SIZE] = DMS_API_BASE_URL_TEST;
 
 
 /* 前置聲明和輔助函數 */

@@ -74,8 +74,8 @@ typedef struct {
     uint32_t lastHeartbeat;
     float cpuUsage;
     float memoryUsage;
-    uint32_t networkBytesSent;
-    uint32_t networkBytesReceived;
+    uint64_t networkBytesSent;
+    uint64_t networkBytesReceived;
 } shadow_reported_state_t;
 
 /**

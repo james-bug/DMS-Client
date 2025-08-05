@@ -33,6 +33,7 @@
 #define DMS_API_DEVICE_INFO_UPDATE    "v1/device/info/update"
 
 /* 回應緩衝區大小 */
+#define DMS_API_BASE_URL_SIZE         256 
 #define DMS_API_MAX_RESPONSE_SIZE     4096
 #define DMS_API_MAX_URL_SIZE          1024
 #define DMS_API_MAX_PAYLOAD_SIZE      4096
